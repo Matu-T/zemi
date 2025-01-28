@@ -3,6 +3,9 @@
 #include <vector>
 #include <map>
 #include <string>
+#include <cmath>
+#include <fstream>
+#include <sstream>
 
 using namespace std;
 
@@ -251,18 +254,52 @@ public:
     }
 };
 
-
-
 int main()
 {
-    cout << "Hello" << endl;
     //1.個人の特性の入力
     int n;
+    cin >> n;
     vector<map<string, double>> feat(n);
-    //2.各交通手段 基礎情報
-    //2.1.自動車
-    //2.1.1.駐車場代 将来的には関数
-    int park = 0;
-    //2.1.2.燃費
-    double fuel = 0;
+    //2.交通手段の入力
+
+    //3.RP/SPデータの入力
+
+    //3.1.RPデータ
+    ifstream file("test.csv"); // CSVファイルを開く
+    string line; // 行を格納する変数
+    vector<vector<double>> revealed(n); // データを格納
+
+    // ファイルが開けたか確認
+    if (file.is_open()) {
+        while (getline(file, line)) { // 行を1行ずつ読み込む
+            stringstream ss(line); // 行をストリームに変換
+            string value;
+            vector<double> row; // 行のデータを格納
+
+            // カンマで区切られた値を読み込む
+            while (getline(ss, value, ',')) {
+                try {
+                    row.push_back(stod(value)); // 値を double に変換して行に追加
+                } catch (const invalid_argument& e) {
+                    cerr << "変換エラー: " << value << endl;
+                } catch (const out_of_range& e) {
+                    cerr << "値が範囲外です: " << value << endl;
+                }
+            }
+            revealed.push_back(row); // 行をデータに追加
+        }
+        file.close(); // ファイルを閉じる
+    } else {
+        std::cerr << "ファイルを開けませんでした。" << std::endl; // エラーメッセージ
+    }
+
+    // データの確認用
+    for (const auto& row : revealed) {
+        for (const auto& val : row) {
+            std::cout << val << " ";
+        }
+        std::cout << std::endl;
+    }
+
+    return 0;
 }
