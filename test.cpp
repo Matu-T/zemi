@@ -254,52 +254,76 @@ public:
     }
 };
 
-int main()
-{
-    //1.個人の特性の入力
-    int n;
-    cin >> n;
-    vector<map<string, double>> feat(n);
-    //2.交通手段の入力
+struct DataSet {
+    vector<vector<double>> revealedX;
+    vector<vector<double>> revealedY;
+    vector<vector<int>> revealedMeans;//ここはintでもよい
+    /*vector<vector<double>> statedX;
+    vector<vector<double>> statedY;
+    vector<vector<int>> statedMeans;*/
+};
 
-    //3.RP/SPデータの入力
-
-    //3.1.RPデータ
-    ifstream file("test.csv"); // CSVファイルを開く
+template<typename T>
+void LoadFile (string fileName, string type, vector<vector<T>>& vec){
+    ifstream file(fileName); // CSVファイルを開く
     string line; // 行を格納する変数
-    vector<vector<double>> revealed(n); // データを格納
 
     // ファイルが開けたか確認
     if (file.is_open()) {
         while (getline(file, line)) { // 行を1行ずつ読み込む
             stringstream ss(line); // 行をストリームに変換
             string value;
-            vector<double> row; // 行のデータを格納
+            vector<T> row; // 行のデータを格納
 
             // カンマで区切られた値を読み込む
             while (getline(ss, value, ',')) {
                 try {
-                    row.push_back(stod(value)); // 値を double に変換して行に追加
+                    if(type == "double"){
+                        row.emplace_back(stod(value)); // 値を double に変換して行に追加
+                    } else if(type == "int"){
+                        row.emplace_back(stoi(value)); // 値を int に変換して行に追加
+                    }
                 } catch (const invalid_argument& e) {
                     cerr << "変換エラー: " << value << endl;
                 } catch (const out_of_range& e) {
                     cerr << "値が範囲外です: " << value << endl;
                 }
             }
-            revealed.push_back(row); // 行をデータに追加
+            vec.emplace_back(row); // 行をデータに追加
         }
         file.close(); // ファイルを閉じる
     } else {
         std::cerr << "ファイルを開けませんでした。" << std::endl; // エラーメッセージ
     }
 
+}
+
+int main()
+{
+    //1.個人の特性の入力
+    vector<map<string, double>> feat;
+    //2.交通手段の入力
+
+    //3.RP/SPデータの入力
+    DataSet data;
+
+    LoadFile("revealedX.csv", "double", data.revealedX);
+    LoadFile("revealedY.csv", "double", data.revealedY);
+    LoadFile("revealedMeans.csv", "int", data.revealedMeans);
+    /*LoadFile("statedX.csv", "double", data.statedX);
+    LoadFile("statedY.csv", "double", data.statedY);
+    LoadFile("statedMeans.csv", "int", data.statedMeans);*/
+
+
     // データの確認用
-    for (const auto& row : revealed) {
+    /*for (const auto& row : revealedX) {
         for (const auto& val : row) {
             std::cout << val << " ";
         }
         std::cout << std::endl;
-    }
+    }*/
+
+
 
     return 0;
 }
