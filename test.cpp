@@ -264,6 +264,20 @@ struct DataSet {
 };
 
 template<typename T>
+T ConvertValue(const string& value){
+    try {
+        if constexpr (is_same_v<T, int>){// int型であれば変換
+            return stoi(value);
+        } else if constexpr (is_same_v<T, double>){
+            return stod(value);
+        }
+    } catch (const exception& e) {
+            cerr << "変換エラー: " << value << endl;
+    }
+    return T{};
+}
+
+template<typename T>
 void LoadFile (string fileName, string type, vector<vector<T>>& vec){
     ifstream file(fileName); // CSVファイルを開く
     string line; // 行を格納する変数
@@ -298,10 +312,71 @@ void LoadFile (string fileName, string type, vector<vector<T>>& vec){
 
 }
 
+void LoadFileAsMap (string fileName, string type, vector<map<string, double>>& m){
+    ifstream file(fileName); // CSVファイルを開く
+    string line; // 行を格納する変数
+
+    // ファイルが開けたか確認
+    if (file.is_open()) {
+        vector<string> keys; // keyを格納
+
+        //key(1行目)の読み込み
+        if(getline(file, line)){
+            stringstream ss(line);
+            string key;
+            while(getline(ss, key, ',')){
+                keys.emplace_back(key);
+            }
+        }
+
+        int cnt = 0;// 個人を表すインデックス
+        while (getline(file, line)) { // 残りの行を1行ずつ読み込む
+            stringstream ss(line); // 行をストリームに変換
+            string value;
+            int index = 0;
+
+            m.emplace_back(map<string, double>());// mapの追加 
+
+            // カンマで区切られた値を読み込む
+            while (getline(ss, value, ',')) {
+                try {
+                    if(type == "double"){
+                        m[cnt][keys[index]] = stod(value); // 値を double に変換して行に追加
+                    } else if(type == "int"){
+                        m[cnt][keys[index]] = stoi(value); // 値を int に変換して行に追加
+                    }
+                } catch (const invalid_argument& e) {
+                    cerr << "変換エラー: " << value << endl;
+                } catch (const out_of_range& e) {
+                    cerr << "値が範囲外です: " << value << endl;
+                }
+                //カンマ毎に別のkeyへ格納
+                index ++;
+            }
+            // 1行終わるごとに個人+1
+            cnt ++;
+            }
+        file.close(); // ファイルを閉じる
+    } else {
+        std::cerr << "ファイルを開けませんでした。" << std::endl; // エラーメッセージ
+    }
+
+}
+
 int main()
 {
     //1.個人の特性の入力
+    //[{"placex":__, "placey":__, "gender":__, ...},{},...]
     vector<map<string, double>> feat;
+    LoadFileAsMap("feat.csv", "double", feat);
+
+    /*確認用
+    for(int i = 0; i < feat.size(); i++){
+        for(const auto& key: feat[i]){
+            cout << "key:" << key.first << "value:" << key.second << endl; 
+        }
+    }*/
+
     //2.交通手段の入力
 
     //3.RP/SPデータの入力
@@ -310,13 +385,9 @@ int main()
     LoadFile("revealedX.csv", "double", data.revealedX);
     LoadFile("revealedY.csv", "double", data.revealedY);
     LoadFile("revealedMeans.csv", "int", data.revealedMeans);
-    /*LoadFile("statedX.csv", "double", data.statedX);
-    LoadFile("statedY.csv", "double", data.statedY);
-    LoadFile("statedMeans.csv", "int", data.statedMeans);*/
 
-
-    // データの確認用
-    /*for (const auto& row : revealedX) {
+    /* 確認用
+    for (const auto& row : revealedX) {
         for (const auto& val : row) {
             std::cout << val << " ";
         }
