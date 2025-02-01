@@ -9,7 +9,7 @@
 
 using namespace std;
 
-//2.1.0.自動車,二輪車 基底構造体
+//自動車,二輪車 基底構造体
 struct Vehicle
 {
 protected:
@@ -28,71 +28,67 @@ public:
      : sx_(sx), sy_(sy), gx_(gx), gy_(gy), dis_(0), park_(p), fuelpk_(fp), fuel_(0), speed_(sp) {}
 
     //仮想関数 派生クラスでoverride
-    virtual void calcDistance() {};
+    virtual double getDistance() {};
 
-    void calcFuel(){
-        fuel_ = dis_ * fuelpk_;
+    double getCost(){
+        fuel_ = getDistance() * fuelpk_;
+        return fuel_ + park_;
     }
-    double getFuel() const{
-        return fuel_;
-    }
-    double getDistance() const{
-        return dis_;
-    }
-    double getCost() const{
-        return park_ + fuel_;
-    }
-    double getTime() const{
-        return dis_/speed_;
+
+    double getTime(){
+        return getDistance() /speed_;
     }
 
 };
 
-//2.1.自動車(送迎・ライドシェア含む)
+//自動車(送迎・ライドシェア含む)
 struct Car : Vehicle
 {
 public:
     Car(double sx, double sy, double gx, double gy, double p, double fp, double sp)
         : Vehicle(sx, sy, gx, gy, p, fp, sp) {}
 
-    void calcDistance() override{
+    double getDistance() override{
         double sl = sqrt(pow(gx_ - sx_, 2.0) +  pow(gy_ - sy_, 2.0));
         //ここでは直線距離の1.2倍を実際の距離とする
         dis_ = sl * 1.2;
+        return dis_;
     }
 };
 
 
-//2.2.バイク
+//バイク
 struct Motor : Vehicle
 {
 public:
     Motor(double sx, double sy, double gx, double gy, double p, double fp, double sp)
         : Vehicle(sx, sy, gx, gy, p, fp, sp) {}
 
-    void calcDistance() override{
+    double getDistance() override{
         double sl = sqrt(pow(gx_ - sx_, 2.0) +  pow(gy_ - sy_, 2.0));
         //ここでは直線距離の1.1倍を実際の距離とする
         dis_ = sl * 1.1;
+        return dis_;
     }
 };
 
-//2.3.自転車
+//自転車
 struct Bicycle : Vehicle
 {
 public:
     Bicycle(double sx, double sy, double gx, double gy, double p, double fp, double sp)
         : Vehicle(sx, sy, gx, gy, p, fp, sp) {}
 
-    void calcDistance() override{
+    double getDistance() override{
         double sl = sqrt(pow(gx_ - sx_, 2.0) +  pow(gy_ - sy_, 2.0));
         //ここでは直線距離の1.05倍を実際の距離とする
         dis_ = sl * 1.05;
+        return dis_;
     }
 };
 
 
-//2.4.0.公共交通機関 基底構造体
+//公共交通機関 基底構造体
 struct Transp
 {
 protected:
@@ -108,11 +104,7 @@ public:
     Transp(double sx, double sy, double gx, double gy, map<double, double>& farebd, double speed)
      : sx_(sx), sy_(sy), gx_(gx), gy_(gy), dis_(0), farebd_(farebd), fare_(0), speed_(speed) {}
 
-    virtual void calcDistance() {};
-
-    double getDistance() const{
-        return dis_;
-    }
+    virtual double getDistance() {};
 
     double getCost(){
         double distance = getDistance();
@@ -135,7 +127,7 @@ public:
 
 };
 
-//2.4.1.鉄道(LRTも含む)
+//鉄道(LRTも含む)
 struct Train : Transp
 {
 public:
@@ -143,28 +135,30 @@ public:
         : Transp(sx,sy,gx,gy,farebd,speed) {}
 
     //電車のみ バスは異なる
-    void calcDistance() override{
+    double getDistance() override{
         double sl = sqrt(pow(gx_ - sx_, 2.0) +  pow(gy_ - sy_, 2.0));
         //ここでは直線距離の1.25倍を実際の距離とする
         dis_ = sl * 1.25;
+        return dis_;
     }
 };
 
-//2.5.バス
+//バス
 struct Bus : Transp
 {
 public:
     Bus(double sx, double sy, double gx, double gy, map<double, double>& farebd, double speed)
         : Transp(sx,sy,gx,gy,farebd,speed) {}
 
-    void calcDistance() override{
+    double getDistance() override{
         double sl = sqrt(pow(gx_ - sx_, 2.0) +  pow(gy_ - sy_, 2.0));
         //ここでは直線距離の1.1倍を実際の距離とする
         dis_ = sl * 1.1;
+        return dis_;
     }
 };
 
-//2.6.タクシー
+//タクシー
 struct Taxi
 {
 protected:
@@ -180,15 +174,13 @@ public:
     Taxi(double sx, double sy, double gx, double gy, map<double, double>& farebd, double speed)
      : sx_(sx), sy_(sy), gx_(gx), gy_(gy), dis_(0), farebd_(farebd), fare_(0), speed_(speed) {}
 
-    void calcDistance(){
+    double getDistance(){
         double sl = sqrt(pow(gx_ - sx_, 2.0) +  pow(gy_ - sy_, 2.0));
         //ここでは直線距離の1.2倍を実際の距離とする
         dis_ = sl * 1.2;
-    }
-
-    double getDistance() const{
         return dis_;
     }
+
     double getCost(){
         double distance = getDistance();
 
@@ -201,12 +193,12 @@ public:
             }
         }
     }
-    double getTime() const{
-        return dis_/speed_;
+    double getTime(){
+        return getDistance() /speed_;
     }
 };
 
-//2.7.徒歩
+//徒歩
 struct Walk
 {
 protected:
@@ -221,24 +213,22 @@ public:
     Walk(double sx, double sy, double gx, double gy, double sp)
      : sx_(sx), sy_(sy), gx_(gx), gy_(gy), dis_(0), speed_(sp) {}
 
-    void calcDistance(){
+    double getDistance(){
         double sl = sqrt(pow(gx_ - sx_, 2.0) +  pow(gy_ - sy_, 2.0));
         //ここでは直線距離の1.05倍を実際の距離とする
         dis_ = sl * 1.05;
-    }
-
-    double getDistance() const{
         return dis_;
     }
-    double getTime() const{
-        return dis_/speed_;
+
+    double getTime(){
+        return getDistance() /speed_;
     }
 };
 
 struct DataSet {
     vector<vector<double>> revealedX;
     vector<vector<double>> revealedY;
-    vector<vector<int>> revealedMeans;//ここはintでもよい
+    vector<vector<int>> revealedMeans;
     /*vector<vector<double>> statedX;
     vector<vector<double>> statedY;
     vector<vector<int>> statedMeans;*/
@@ -291,6 +281,35 @@ void LoadFile (string fileName, string type, vector<vector<T>>& vec){
         std::cerr << "ファイルを開けませんでした。" << std::endl; // エラーメッセージ
     }
 
+}
+
+void LoadFileAsFare (string fileName, map<double, double>& m){
+    ifstream file(fileName); // CSVファイルを開く
+    string line; // 行を格納する変数
+
+    // ファイルが開けたか確認
+    if (file.is_open()) {
+        while (getline(file, line)) { // 行を1行ずつ読み込む
+            stringstream ss(line); // 行をストリームに変換
+            string distance;
+            string cost;
+
+            getline(ss, distance, ',');
+            getline(ss, cost, ',');
+            try{
+                m[stod(distance)] = stod(cost);
+            } catch (const invalid_argument& e) {
+                cerr << "変換エラー: " << distance << endl;
+                cerr << "変換エラー: " << cost<< endl;
+            } catch (const out_of_range& e) {
+                cerr << "範囲外です: " << distance << endl;
+                cerr << "範囲外です: " << cost<< endl;
+            }
+        }
+        file.close(); // ファイルを閉じる
+    } else {
+        std::cerr << "ファイルを開けませんでした。" << std::endl; // エラーメッセージ
+    }
 }
 
 void LoadFileAsMap (string fileName, string type, vector<map<string, double>>& m){
@@ -350,6 +369,7 @@ int main()
     //[{"placex":__, "placey":__, "gender":__, ...},{},...]
     vector<map<string, double>> feat;
     LoadFileAsMap("feat.csv", "double", feat);
+    int n = feat.size();
 
     /*確認用
     for(int i = 0; i < feat.size(); i++){
@@ -358,17 +378,25 @@ int main()
         }
     }*/
 
-    //2.交通手段の入力
-
-    //3.RP/SPデータの入力
+    //2.RP/SPデータの入力
     DataSet data;
 
+    /*
+    以下は次のindexを使用する
+    1.鉄道
+    2.バス
+    3.自動車
+    4.タクシー
+    5.バイク
+    6.自転車
+    7.徒歩
+    */
     LoadFile("revealedX.csv", "double", data.revealedX);
     LoadFile("revealedY.csv", "double", data.revealedY);
     LoadFile("revealedMeans.csv", "int", data.revealedMeans);
 
     /* 確認用
-    for (const auto& row : revealedX) {
+    for (const auto& row : data.revealedX) {
         for (const auto& val : row) {
             std::cout << val << " ";
         }
@@ -376,6 +404,138 @@ int main()
     }*/
 
 
+    //3.交通手段の入力 -> 個人属性へ追加
+
+    //3.1.運賃体系の入力
+    map<double, double> trainFarebd;
+    map<double, double> busFarebd;
+    map<double, double> taxiFarebd;
+    LoadFileAsFare("trainFarebd.csv", trainFarebd);
+    LoadFileAsFare("busFarebd.csv", busFarebd);
+    LoadFileAsFare("taxiFarebd.csv", taxiFarebd);
+
+    //3.2.交通手段毎の構造体配列定義, 格納
+    vector<vector<Train>> trains(n, vector<Train>());
+    vector<vector<Bus>> buses(n, vector<Bus>());
+    vector<vector<Car>> cars(n, vector<Car>());
+    vector<vector<Taxi>> taxis(n, vector<Taxi>());
+    vector<vector<Motor>> motors(n, vector<Motor>());
+    vector<vector<Bicycle>> bicycles(n, vector<Bicycle>());
+    vector<vector<Walk>> walks(n, vector<Walk>());
+
+    //csvデータを格納するための配列
+    vector<vector<double>> trainvec;
+    vector<vector<double>> busvec;
+    vector<vector<double>> carvec;
+    vector<vector<double>> taxivec;
+    vector<vector<double>> motorvec;
+    vector<vector<double>> bicyclevec;
+    vector<vector<double>> walkvec;
+
+    LoadFile("train.csv", "double", trainvec);
+    LoadFile("bus.csv", "double", busvec);
+    LoadFile("car.csv", "double", carvec);
+    LoadFile("taxi.csv", "double", taxivec);
+    LoadFile("motor.csv", "double", motorvec);
+    LoadFile("bicycle.csv", "double", bicyclevec);
+    LoadFile("walk.csv", "double", walkvec);
+
+    // 個人についてループ
+    for(int i = 0; i < data.revealedMeans.size(); i++){
+        //同じ交通手段を複数用いている場合
+        //walkのみ同じ変数を使用
+        int tr = 0;
+        int bu = 0;
+        int ca = 0;
+        int ta = 0;
+        int mo = 0;
+        int bi = 0;
+
+        // 使用した手段についてループ
+        for(int j = 0; j < data.revealedMeans[i].size(); j++){
+            int val = data.revealedMeans[i][j];
+            switch(val){
+                // 電車
+                case 1:
+                    trains[i].emplace_back(
+                        Train{data.revealedX[i][j], data.revealedX[i][j+1],data.revealedY[i][j],data.revealedY[i][j+1],trainFarebd, trainvec[i][tr]});
+                    tr ++;
+                    break;
+                // バス
+                case 2:
+                    buses[i].emplace_back(
+                        Bus{data.revealedX[i][j], data.revealedX[i][j+1],data.revealedY[i][j],data.revealedY[i][j+1],busFarebd, busvec[i][bu]});
+                    bu ++;
+                    break;
+                // 車
+                case 3:
+                    //csvから入力する変数は3つであることに注意
+                    cars[i].emplace_back(
+                        Car{data.revealedX[i][j], data.revealedX[i][j+1],data.revealedY[i][j],data.revealedY[i][j+1], carvec[i][3*ca], carvec[i][3*ca+1],carvec[i][3*ca+2]});
+                    ca ++;
+                    break;
+                // タクシー
+                case 4:
+                    taxis[i].emplace_back(
+                        Taxi{data.revealedX[i][j], data.revealedX[i][j+1],data.revealedY[i][j],data.revealedY[i][j+1], taxiFarebd, taxivec[i][ta]});
+                    ta ++;
+                    break;          
+                // バイク
+                case 5:
+                    motors[i].emplace_back(
+                        Motor{data.revealedX[i][j], data.revealedX[i][j+1], data.revealedY[i][j],data.revealedY[i][j+1], carvec[i][3*mo], carvec[i][3*mo+1],carvec[i][3*mo+2]});
+                    mo ++;
+                    break;          
+                // 自転車
+                case 6:
+                    bicycles[i].emplace_back(
+                        Bicycle{data.revealedX[i][j], data.revealedX[i][j+1], data.revealedY[i][j],data.revealedY[i][j+1], carvec[i][3*bi], carvec[i][3*bi+1],carvec[i][3*bi+2]});
+                    bi ++;
+                    break;
+                // 徒歩
+                case 7:
+                    walks[i].emplace_back(
+                        Walk{data.revealedX[i][j], data.revealedX[i][j+1], data.revealedY[i][j],data.revealedY[i][j+1], walkvec[i][0]});
+                    break;
+            }
+        }
+    }
+
+    //3.3.集計
+    for(int i = 0; i < n; i++){
+        //予めdistanceを計算しておくことで効率化可能
+        //3.3.1.費用
+        double cost = 0;
+        for(int j = 0; j < trains[i].size(); j++){cost += trains[i][j].getCost();}
+        for(int j = 0; j < buses[i].size(); j++){cost += buses[i][j].getCost();}
+        for(int j = 0; j < cars[i].size(); j++){cost += cars[i][j].getCost();}
+        for(int j = 0; j < taxis[i].size(); j++){cost += taxis[i][j].getCost();}
+        for(int j = 0; j < motors[i].size(); j++){cost += motors[i][j].getCost();}
+        for(int j = 0; j < bicycles[i].size(); j++){cost += bicycles[i][j].getCost();}
+        feat[i]["cost"] = cost;
+        //3.3.2.総合時間
+        double time = 0;
+        for(int j = 0; j < trains[i].size(); j++){cost += trains[i][j].getTime();}
+        for(int j = 0; j < buses[i].size(); j++){cost += buses[i][j].getTime();}
+        for(int j = 0; j < cars[i].size(); j++){cost += cars[i][j].getTime();}
+        for(int j = 0; j < taxis[i].size(); j++){cost += taxis[i][j].getTime();}
+        for(int j = 0; j < motors[i].size(); j++){cost += motors[i][j].getTime();}
+        for(int j = 0; j < bicycles[i].size(); j++){cost += bicycles[i][j].getTime();}
+        for(int j = 0; j < walks[i].size(); j++){cost += walks[i][j].getTime();}
+        feat[i]["time"] = time;
+        //3.3.3.乗車時間
+        double invehicle = 0;
+        for(int j = 0; j < trains[i].size(); j++){invehicle += trains[i][j].getTime();}
+        for(int j = 0; j < buses[i].size(); j++){invehicle += buses[i][j].getTime();}
+        feat[i]["invehicle"] = invehicle;
+        //3.3.4.アクセス距離 イグレス距離（鉄道,バス）
+        if(count(begin(data.revealedMeans[i]), end(data.revealedMeans[i]), 1) || count(begin(data.revealedMeans[i]), end(data.revealedMeans[i]), 2)){
+            feat[i]["access"] = walks[i][0].getDistance();
+            feat[i]["egress"] = walks[i][walks[i].size() - 1].getDistance(); //最後の要素の距離
+        }
+        //3.3.4.乗換え回数
+        feat[i]["transfer"] = data.revealedMeans[i].size() - 1;
+    }
 
     return 0;
 }
