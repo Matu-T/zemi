@@ -96,27 +96,22 @@ public:
 struct Transp
 {
 protected:
-    vector<double> spx_;//各スポットのx座標
-    vector<double> spy_;//各スポットのy座標
-    int si_;//出発地index
-    int gi_;//到着地index
-    vector<double> dxy_;//距離
+    double sx_;//出発地x座標
+    double sy_;//出発地y座標
+    double gx_;//目的地x座標
+    double gy_;//目的地y座標
+    double dis_;//距離
     map<double, double> farebd_;//std::map farebd_(fare by distance)は、料金が変わる距離とその金額を格納fare[0] = 100 fare[0.255] = 270,...
     double fare_;
     double speed_;//平均速度
 public:
-    Transp(vector<double> spx, vector<double> spy, int si, int gi, map<double, double>& farebd, double speed)
-     : spx_(spx), spy_(spy), si_(si), gi_(gi), dxy_(vector<double>(spx.size(),0)), farebd_(farebd), fare_(0), speed_(speed) {}
-
-    //外から入力する場合
-    void setDistance(vector<double> dxy){
-        dxy_ = dxy;
-    }
+    Transp(double sx, double sy, double gx, double gy, map<double, double>& farebd, double speed)
+     : sx_(sx), sy_(sy), gx_(gx), gy_(gy), dis_(0), farebd_(farebd), fare_(0), speed_(speed) {}
 
     virtual void calcDistance() {};
 
     double getDistance() const{
-        return abs(dxy_[gi_] - dxy_[si_]);
+        return dis_;
     }
 
     double getCost(){
@@ -144,21 +139,14 @@ public:
 struct Train : Transp
 {
 public:
-    Train(vector<double> spx, vector<double> spy, int si, int gi,map<double, double>& farebd, double speed)
-        : Transp(spx,spy,si,gi,farebd,speed) {}
+    Train(double sx, double sy, double gx, double gy, map<double, double>& farebd, double speed)
+        : Transp(sx,sy,gx,gy,farebd,speed) {}
 
     //電車のみ バスは異なる
     void calcDistance() override{
-        //全て0のとき 全探索する必要はない
-        if(all_of(dxy_.begin(), dxy_.end(), [](double dxy) {return dxy == 0;})){
-            int length = dxy_.size();
-            //dxy_[0] = 0;
-            for(int i = 1; i < length; ++i){
-                double eachDxy = sqrt(pow(spx_[i] - spx_[i-1], 2.0) +  pow(spy_[i] - spy_[i-1], 2.0));
-                //ここでは直線距離の1.2倍を実際の距離とする
-                dxy_[i] = eachDxy * 1.2;
-            }
-        }
+        double sl = sqrt(pow(gx_ - sx_, 2.0) +  pow(gy_ - sy_, 2.0));
+        //ここでは直線距離の1.25倍を実際の距離とする
+        dis_ = sl * 1.25;
     }
 };
 
@@ -166,20 +154,13 @@ public:
 struct Bus : Transp
 {
 public:
-    Bus(vector<double> spx, vector<double> spy, int si, int gi,map<double, double>& farebd, double speed)
-        : Transp(spx,spy,si,gi,farebd,speed) {}
+    Bus(double sx, double sy, double gx, double gy, map<double, double>& farebd, double speed)
+        : Transp(sx,sy,gx,gy,farebd,speed) {}
 
     void calcDistance() override{
-        //全て0のとき 全探索する必要はない
-        if(all_of(dxy_.begin(), dxy_.end(), [](double dxy) {return dxy == 0;})){
-            int length = dxy_.size();
-            //dxy_[0] = 0;
-            for(int i = 1; i < length; ++i){
-                double eachDxy = sqrt(pow(spx_[i] - spx_[i-1], 2.0) +  pow(spy_[i] - spy_[i-1], 2.0));
-                //バスと変えるとしたら距離関数
-                dxy_[i] = eachDxy * 1.2;
-            }
-        }
+        double sl = sqrt(pow(gx_ - sx_, 2.0) +  pow(gy_ - sy_, 2.0));
+        //ここでは直線距離の1.1倍を実際の距離とする
+        dis_ = sl * 1.1;
     }
 };
 
