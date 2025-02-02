@@ -5,8 +5,12 @@
 #include <string>
 #include <cmath>
 #include <fstream>
-#include <sstream>
+#include <sstream>	
+#include "Eigen/core"
+#include "Eigen/LU"
+#include "Eigen/Dense"
 
+using Eigen::MatrixXd;
 using namespace std;
 
 //自動車,二輪車 基底構造体
@@ -161,6 +165,21 @@ public:
     }
 };
 
+//バス
+struct Autobus : Transp
+{
+public:
+    Autobus(double sx, double sy, double gx, double gy, map<double, double>& farebd, double speed)
+        : Transp(sx,sy,gx,gy,farebd,speed) {}
+
+    double getDistance() override{
+        double sl = sqrt(pow(gx_ - sx_, 2.0) +  pow(gy_ - sy_, 2.0));
+        //ここでは直線距離の1.2倍を実際の距離とする
+        dis_ = sl * 1.2;
+        return dis_;
+    }
+};
+
 //タクシー
 struct Taxi
 {
@@ -235,9 +254,12 @@ struct DataSet {
     vector<vector<double>> revealedX;
     vector<vector<double>> revealedY;
     vector<vector<int>> revealedMeans;
-    /*vector<vector<double>> statedX;
+    vector<vector<double>> statedX;
     vector<vector<double>> statedY;
-    vector<vector<int>> statedMeans;*/
+    vector<vector<int>> statedMeans;
+    vector<vector<double>> alternateX;
+    vector<vector<double>> alternateY;
+    vector<vector<int>> alternateMeans;
 };
 
 template<typename T>
@@ -369,56 +391,17 @@ void LoadFileAsMap (string fileName, string type, vector<map<string, double>>& m
 
 }
 
-int main()
-{
-    //1.個人の特性の入力
-    //[{"placex":__, "placey":__, "gender":__, ...},{},...]
-    vector<map<string, double>> feat;
-    LoadFileAsMap("feat.csv", "double", feat);
-    int n = feat.size();
-
-    /*確認用
-    for(int i = 0; i < feat.size(); i++){
-        for(const auto& key: feat[i]){
-            cout << "key:" << key.first << "value:" << key.second << endl; 
-        }
-    }*/
-
-    //2.RP/SPデータの入力
-    DataSet data;
-
-    /*
-    以下は次のindexを使用する
-    1.鉄道
-    2.バス
-    3.自動車
-    4.タクシー
-    5.バイク
-    6.自転車
-    7.徒歩
-    */
-    LoadFile("revealedX.csv", "double", data.revealedX);
-    LoadFile("revealedY.csv", "double", data.revealedY);
-    LoadFile("revealedMeans.csv", "int", data.revealedMeans);
-
-    /* 確認用
-    for (const auto& row : data.revealedX) {
-        for (const auto& val : row) {
-            std::cout << val << " ";
-        }
-        std::cout << std::endl;
-    }*/
-
-
-    //3.交通手段の入力 -> 個人属性へ追加
-
+void storeVariables(int n, string dataType, vector<map<string, double>> &feat, vector<vector<double>>& x, vector<vector<double>>& y, vector<vector<int>>& means){
     //3.1.運賃体系の入力
     map<double, double> trainFarebd;
     map<double, double> busFarebd;
     map<double, double> taxiFarebd;
+    map<double, double> autobusFarebd; //SPのみ
+
     LoadFileAsFare("trainFarebd.csv", trainFarebd);
     LoadFileAsFare("busFarebd.csv", busFarebd);
     LoadFileAsFare("taxiFarebd.csv", taxiFarebd);
+    LoadFileAsFare("autobusFarebd.csv", autobusFarebd);
 
     //3.2.交通手段毎の構造体配列定義, 格納
     vector<vector<Train>> trains(n, vector<Train>());
@@ -428,6 +411,7 @@ int main()
     vector<vector<Motor>> motors(n, vector<Motor>());
     vector<vector<Bicycle>> bicycles(n, vector<Bicycle>());
     vector<vector<Walk>> walks(n, vector<Walk>());
+    vector<vector<Autobus>> autobuses(n, vector<Autobus>()); 
 
     //csvデータを格納するための配列
     vector<vector<double>> trainvec;
@@ -437,6 +421,7 @@ int main()
     vector<vector<double>> motorvec;
     vector<vector<double>> bicyclevec;
     vector<vector<double>> walkvec;
+    vector<vector<double>> autobusvec;
 
     LoadFile("train.csv", "double", trainvec);
     LoadFile("bus.csv", "double", busvec);
@@ -445,6 +430,7 @@ int main()
     LoadFile("motor.csv", "double", motorvec);
     LoadFile("bicycle.csv", "double", bicyclevec);
     LoadFile("walk.csv", "double", walkvec);
+    LoadFile("autobus.csv", "double", autobusvec);
 
     // 個人についてループ
     for(int i = 0; i < n; i++){
@@ -456,52 +442,59 @@ int main()
         int ta = 0;
         int mo = 0;
         int bi = 0;
+        int au = 0;
 
         // 使用した手段についてループ
-        for(int j = 0; j < data.revealedMeans[i].size(); j++){
-            int val = data.revealedMeans[i][j];
+        for(int j = 0; j < means[i].size(); j++){
+            int val = means[i][j];
             switch(val){
                 // 電車
                 case 1:
                     trains[i].emplace_back(
-                        Train{data.revealedX[i][j],data.revealedY[i][j], data.revealedX[i][j+1],data.revealedY[i][j+1],trainFarebd, trainvec[i][tr]});
+                        Train{x[i][j],y[i][j], x[i][j+1],y[i][j+1],trainFarebd, trainvec[i][tr]});
                     tr ++;
                     break;
                 // バス
                 case 2:
                     buses[i].emplace_back(
-                        Bus{data.revealedX[i][j],data.revealedY[i][j], data.revealedX[i][j+1],data.revealedY[i][j+1],busFarebd, busvec[i][bu]});
+                        Bus{x[i][j],y[i][j], x[i][j+1],y[i][j+1],busFarebd, busvec[i][bu]});
                     bu ++;
                     break;
                 // 車
                 case 3:
                     //csvから入力する変数は3つであることに注意
                     cars[i].emplace_back(
-                        Car{data.revealedX[i][j],data.revealedY[i][j], data.revealedX[i][j+1],data.revealedY[i][j+1], carvec[i][3*ca], carvec[i][3*ca+1],carvec[i][3*ca+2]});
+                        Car{x[i][j],y[i][j], x[i][j+1],y[i][j+1], carvec[i][3*ca], carvec[i][3*ca+1],carvec[i][3*ca+2]});
                     ca ++;
                     break;
                 // タクシー
                 case 4:
                     taxis[i].emplace_back(
-                        Taxi{data.revealedX[i][j],data.revealedY[i][j], data.revealedX[i][j+1],data.revealedY[i][j+1], taxiFarebd, taxivec[i][ta]});
+                        Taxi{x[i][j],y[i][j], x[i][j+1],y[i][j+1], taxiFarebd, taxivec[i][ta]});
                     ta ++;
                     break;          
                 // バイク
                 case 5:
                     motors[i].emplace_back(
-                        Motor{data.revealedX[i][j], data.revealedY[i][j], data.revealedX[i][j+1],data.revealedY[i][j+1], motorvec[i][3*mo], motorvec[i][3*mo+1], motorvec[i][3*mo+2]});
+                        Motor{x[i][j], y[i][j], x[i][j+1],y[i][j+1], motorvec[i][3*mo], motorvec[i][3*mo+1], motorvec[i][3*mo+2]});
                     mo ++;
                     break;          
                 // 自転車
                 case 6:
                     bicycles[i].emplace_back(
-                        Bicycle{data.revealedX[i][j], data.revealedY[i][j], data.revealedX[i][j+1],data.revealedY[i][j+1], bicyclevec[i][3*bi], bicyclevec[i][3*bi+1], bicyclevec[i][3*bi+2]});
+                        Bicycle{x[i][j], y[i][j], x[i][j+1],y[i][j+1], bicyclevec[i][3*bi], bicyclevec[i][3*bi+1], bicyclevec[i][3*bi+2]});
                     bi ++;
                     break;
                 // 徒歩
                 case 7:
                     walks[i].emplace_back(
-                        Walk{data.revealedX[i][j], data.revealedY[i][j], data.revealedX[i][j+1],data.revealedY[i][j+1], walkvec[i][0]});
+                        Walk{x[i][j], y[i][j], x[i][j+1],y[i][j+1], walkvec[i][0]});
+                    break;
+                //自動運転バス
+                case 8:
+                    autobuses[i].emplace_back(
+                        Autobus{x[i][j], y[i][j], x[i][j+1],y[i][j+1], autobusFarebd, autobusvec[i][au]});
+                        au ++;
                     break;
             }
         }
@@ -519,6 +512,7 @@ int main()
         for(int j = 0; j < taxis[i].size(); j++){cost += taxis[i][j].getCost();}
         for(int j = 0; j < motors[i].size(); j++){cost += motors[i][j].getCost();}
         for(int j = 0; j < bicycles[i].size(); j++){cost += bicycles[i][j].getCost();}
+        for(int j = 0; j < autobuses[i].size(); j++){cost += autobuses[i][j].getCost();}
         feat[i]["cost"] = cost;
         //3.3.2.総合時間
         double time = 0;
@@ -529,18 +523,26 @@ int main()
         for(int j = 0; j < motors[i].size(); j++){time += motors[i][j].getTime();}
         for(int j = 0; j < bicycles[i].size(); j++){time += bicycles[i][j].getTime();}
         for(int j = 0; j < walks[i].size(); j++){time += walks[i][j].getTime();}
+        for(int j = 0; j < autobuses[i].size(); j++){time += autobuses[i][j].getTime();}
         feat[i]["time"] = time;
-        //3.3.3.乗車時間
+
+        //3.3.3.徒歩時間
+        double walktime = 0;
+        for(int j = 0; j < walks[i].size(); j++){walktime += walks[i][j].getTime();}
+        feat[i]["walktime"] = walktime;
+
+        //3.3.4.乗車時間
         double invehicle = 0;
         for(int j = 0; j < trains[i].size(); j++){invehicle += trains[i][j].getTime();}
         for(int j = 0; j < buses[i].size(); j++){invehicle += buses[i][j].getTime();}
+        for(int j = 0; j < autobuses[i].size(); j++){invehicle += autobuses[i][j].getTime();}
         feat[i]["invehicle"] = invehicle;
 
-        //3.3.4.アクセス距離 イグレス距離（鉄道）
+        //3.3.5.アクセス距離 イグレス距離（鉄道）
         //交通手段で1または2を用いているか
-        if (std::any_of(begin(data.revealedMeans[i]), end(data.revealedMeans[i]), 
-                [](int x) { return x == 1 || x == 2; })) {
-            int accessValue = data.revealedMeans[i][0];
+        if (any_of(begin(means[i]), end(means[i]), 
+                [](int w) { return w == 1 || w == 2 || w == 8; })) {
+            int accessValue = means[i][0];
             switch(accessValue){
                 case 3:
                     feat[i]["access"] = cars[i][0].getDistance();
@@ -563,8 +565,7 @@ int main()
                     break;
             }
 
-            int egressValue = data.revealedMeans[i][data.revealedMeans[i].size() - 1];
-            cout << data.revealedMeans[i].size() - 1 << endl;
+            int egressValue = means[i][means[i].size() - 1];
             switch(egressValue){
                 case 3:
                     feat[i]["egress"] = cars[i][cars[i].size() - 1].getDistance();
@@ -587,18 +588,291 @@ int main()
                     break;
             }
         }
+        //D2Dの場合どちらも0
+        feat[i]["access"] = 0;
+        feat[i]["egress"] = 0;
 
-        //3.3.5.乗換え回数
-        feat[i]["transfer"] = data.revealedMeans[i].size() - 1;
+        //3.3.6.乗換え回数
+        feat[i]["transfer"] = means[i].size() - 1;
+
+        //3.3.7.ダミー変数 「主要交通手段」
+        if(count(begin(means[i]), end(means[i]), 1)){
+            feat[i]["train"] = 1;
+        } else{
+            feat[i]["train"] = 0;
+        }
+        if(count(begin(means[i]), end(means[i]), 8) && feat[i]["train"] == 0){
+            feat[i]["autobus"] = 1;
+        } else{
+            feat[i]["autobus"] = 0;
+        }
+        if(count(begin(means[i]), end(means[i]), 2) && feat[i]["train"] == 0 && feat[i]["autobus"] == 0){
+            feat[i]["bus"] = 1;
+        } else{
+            feat[i]["bus"] = 0;
+        }
+        if(any_of(begin(means[i]), end(means[i]), 
+                [](int w) { return w == 3 || w == 4; }) && feat[i]["train"] == 0 && feat[i]["bus"] == 0 && feat[i]["autobus"] == 0){
+            feat[i]["car"] = 1;
+        } else{
+            feat[i]["car"] = 0;
+        }
+        if(any_of(begin(means[i]), end(means[i]), 
+                [](int w) { return w == 5 || w == 6; })&& feat[i]["train"] == 0 && feat[i]["bus"] == 0 && feat[i]["car"] == 0 && feat[i]["autobus"] == 0){
+            feat[i]["bike"] = 1;
+        } else{
+            feat[i]["bike"] = 0;
+        }
+        if(count(begin(means[i]), end(means[i]), 7)&& feat[i]["bike"] == 0&& feat[i]["train"] == 0 && feat[i]["bus"] == 0 && feat[i]["car"] == 0 && feat[i]["autobus"] == 0){
+            feat[i]["walk"] = 1;
+        } else{
+            feat[i]["walk"] = 0;
+        }
+
+
+        //3.3.8.選択肢数
+        int opt = 8; // 初期値は8 減少方式
+        double totdis = sqrt(pow(x[i][0] - x[i][x[i].size() - 1], 2.0) +  pow(y[i][0] - y[i][y[i].size() - 1], 2.0));
+        if(totdis > 5){
+            if(totdis > 1){
+                //直線距離1km以上で徒歩を使わない
+                opt --;
+            }
+            //直線距離5km以上で自転車を使わない
+            opt --;
+        }
+        if(feat[i]["licenseCar"] == 0) opt --;
+        if(feat[i]["licenseBike"] == 0) opt --;
+        if(feat[i]["trainAvailable"] == 0) opt --;
+        if(dataType == "revealed") opt --;
+
+        feat[i]["options"] = opt;
     }
 
-    /*for(int i = 0; i < feat.size(); i++){
-        cout << "個人:" << i << endl;
+}
+
+int main()
+{
+    //1.個人の特性の入力
+    //[{"placex":__, "placey":__, "gender":__, ...},{},...]
+    vector<map<string, double>> rfeat; //regular
+    vector<map<string, double>> afeat; //alternative
+    vector<map<string, double>> sfeat; //stated(autonomous bus)
+    //共通
+    LoadFileAsMap("feat.csv", "double", rfeat);
+    LoadFileAsMap("feat.csv", "double", afeat);
+    LoadFileAsMap("feat.csv", "double", sfeat);
+    //個人数
+    int n = rfeat.size();
+
+    /*確認用
+    for(int i = 0; i < n; i++){
         for(const auto& key: feat[i]){
+            cout << "key:" << key.first << "value:" << key.second << endl; 
+        }
+    }*/
+
+    //2.RP/SPデータの入力
+    DataSet data;
+
+    /*
+    以下は次のindexを使用する
+    1.鉄道
+    2.バス
+    3.自動車
+    4.タクシー
+    5.バイク
+    6.自転車
+    7.徒歩
+    (8.自動運転)
+    */
+    LoadFile("revealedX.csv", "double", data.revealedX);
+    LoadFile("revealedY.csv", "double", data.revealedY);
+    LoadFile("revealedMeans.csv", "int", data.revealedMeans);
+    LoadFile("statedX.csv", "double", data.statedX);
+    LoadFile("statedY.csv", "double", data.statedY);
+    LoadFile("statedMeans.csv", "int", data.statedMeans);
+    LoadFile("alternateX.csv", "double", data.alternateX);
+    LoadFile("alternateY.csv", "double", data.alternateY);
+    LoadFile("alternateMeans.csv", "int", data.alternateMeans);
+
+    /*
+    for (const auto& row : data.alternateX) {
+        for (const auto& val : row) {
+            std::cout << val << " ";
+        }
+        std::cout << std::endl;
+    }*/
+
+    //3.交通手段の入力 -> 個人属性へ追加
+    //RP SP regular
+    storeVariables(n,"revealed",rfeat,data.revealedX,data.revealedY,data.revealedMeans);
+    //RP alternate
+    storeVariables(n,"revealed",afeat,data.alternateX,data.alternateY,data.alternateMeans);
+    //SP autonomous
+    storeVariables(n,"stated",sfeat,data.statedX,data.statedY,data.statedMeans);
+    //SP 選好結果
+    vector<vector<int>> preferences; //一次元配列でもよい
+    LoadFile("statedIntentions.csv", "int", preferences);
+    for(int i = 0; i < n; i++){
+        sfeat[i]["sd"] = (double)preferences[i][0];    
+    }
+
+    for(int i = 0; i < afeat.size(); i++){
+        cout << "個人:" << i << endl;
+        for(const auto& key: afeat[i]){
             cout << key.first << " : " << key.second << " "; 
         }
         cout << endl;
+    }
+
+    //4.モデルの推計
+
+    //4.1.SPデータからμ付きパラメータ推定
+    //推計に用いる変数
+    vector<string> sfactors = {"car","train","bus","bike","autobus","invehicle","access","transfer","age"};
+    int sclms = sfactors.size();
+    double mu1 = 1.0E-4;
+    double mu2 = 1.0E-2;
+
+    Eigen::MatrixXd scoefficients;
+    scoefficients = MatrixXd::Zero(sclms, 1);//最初のパラメータ初期値は0
+
+    Eigen::MatrixXd sgradient;
+    sgradient = MatrixXd::Zero(sclms, 1);
+
+    Eigen::MatrixXd shessian;
+    shessian = MatrixXd::Zero(sclms, sclms);
+    int scnt = 0;
+
+    while(true){
+        //cout << scoefficients << endl;
+        //勾配ベクトルの要素 (i,1)
+        for(int i = 0; i < sclms; i++){
+            double fac = 0;
+            //個人 j
+            for(int j = 0; j < n; j++){
+                double diffs = 0; //θ'(X_sn - X_rn)の計算
+                //属性 k (インデックス sfactors[k]と対応)
+                for(int k = 0; k < sclms; k++){
+                    diffs += scoefficients(k,0) * (sfeat[j][sfactors[k]] - rfeat[j][sfactors[k]]);
+                }
+                double qs = 1 / (1 + exp( - (diffs - sfeat[j]["options"])));
+                fac += (sfeat[j]["sd"] - qs) * (sfeat[j][sfactors[i]] - rfeat[j][sfactors[i]]);
+            }
+            sgradient(i,0) = fac;
+        }   
+
+        //ヘッセ行列の要素 (i,j)
+        for(int i = 0; i < sclms; i++){
+            for(int j = 0; j < sclms; j++){
+                double fac = 0;
+                for(int k = 0; k < n; k ++){
+                    double diffs = 0; //θ'(X_sn - X_rn)の計算
+                    for(int l = 0; l < sclms; l++){
+                        diffs += scoefficients(l,0) * (sfeat[k][sfactors[l]] - rfeat[k][sfactors[l]]);
+                    }
+                    cout << diffs << endl;
+                    double qs = 1 / (1 + exp( - (diffs - sfeat[k]["options"])));
+                    double ql = 1 - qs;
+                    fac += - ql * qs * (sfeat[k][sfactors[i]] - rfeat[k][sfactors[i]]) * (sfeat[k][sfactors[j]] - rfeat[k][sfactors[j]]);
+                }
+                shessian(i,j) = fac;
+            }
+        }
+
+
+        MatrixXd renewedcos;
+        renewedcos = scoefficients - shessian.colPivHouseholderQr().solve(sgradient);
+        double cert1 = 0;
+        for(int i = 0; i < sclms; i++){
+            cert1 += pow(renewedcos(i,0) - scoefficients(i,0), 2.0);
+        }
+        cout << "cert1" << cert1 << endl;
+
+        double cert2 = 0;
+        for(int i = 0; i < sclms; i++){
+            if(scoefficients(i,0) == 0) continue;//実質的に無限大と見ているのと等しい
+            cert2 += (renewedcos(i,0) - scoefficients(i,0)) / scoefficients(i,0);
+        }
+        if(sqrt(cert1) / sclms < mu1 && cert2 < mu2) break;
+
+        scoefficients = renewedcos;
+        scnt ++;
+        if(scnt > 100) break;// 無限ループ防止
+    }
+    //検定量の計算も
+    cout << scnt <<  scoefficients << endl;
+
+    //4.2.RPどうし比較
+    /*vector<string> rfactors = {"car","train","bus","bike","invehicle","access","transfer","age"};
+    int rclms = rfactors.size();
+
+    Eigen::MatrixXd rcoefficients;
+    rcoefficients = MatrixXd::Zero(rclms, 1);//最初のパラメータ初期値は0
+
+    Eigen::MatrixXd rgradient;
+    rgradient = MatrixXd::Zero(rclms, 1);
+
+    Eigen::MatrixXd rhessian;
+    rhessian = MatrixXd::Zero(rclms, rclms);
+    int rcnt = 0;
+
+    while(true){
+        //cout << rcoefficients << endl;
+        //勾配ベクトルの要素 (i,1)
+        for(int i = 0; i < rclms; i++){
+            double fac = 0;
+            //個人 j
+            for(int j = 0; j < n; j++){
+                double diffs = 0; //θ'(X_sn - X_rn)の計算
+                //属性 k (インデックス rfactors[k]と対応)
+                for(int k = 0; k < rclms; k++){
+                    diffs += rcoefficients(k,0) * (afeat[j][rfactors[k]] - rfeat[j][rfactors[k]]);
+                }
+                double pr = 1 / (1 + exp(diffs + rfeat[j]["options"]));
+                fac += (pr - 1) * (afeat[j][rfactors[i]] - rfeat[j][rfactors[i]]);
+            }
+            rgradient(i,0) = fac;
+        }   
+
+        //ヘッセ行列の要素 (i,j)
+        for(int i = 0; i < rclms; i++){
+            for(int j = 0; j < rclms; j++){
+                double fac = 0;
+                for(int k = 0; k < n; k ++){
+                    double diffs = 0; //θ'(X_sn - X_rn)の計算
+                    for(int l = 0; l < rclms; l++){
+                        diffs += rcoefficients(l,0) * (afeat[k][rfactors[l]] - rfeat[k][rfactors[l]]);
+                    }
+                    double pr = 1 / (1 + exp(diffs + rfeat[j]["options"]));
+                    double ps = 1 - pr;
+                    fac += - pr * ps * (afeat[k][rfactors[i]] - rfeat[k][rfactors[i]]) * (afeat[k][rfactors[j]] - rfeat[k][rfactors[j]]);
+                }
+                rhessian(i,j) = fac;
+            }
+        }
+
+
+        MatrixXd renewedcos;
+        renewedcos = rcoefficients - rhessian.colPivHouseholderQr().solve(rgradient);
+        double cert1 = 0;
+        for(int i = 0; i < rclms; i++){
+            cert1 += pow(renewedcos(i,0) - rcoefficients(i,0), 2.0);
+        }
+
+        double cert2 = 0;
+        for(int i = 0; i < rclms; i++){
+            if(rcoefficients(i,0) == 0) continue;//実質的に無限大と見ているのと等しい
+            cert2 += (renewedcos(i,0) - rcoefficients(i,0)) / rcoefficients(i,0);
+        }
+        if(sqrt(cert1) / rclms < mu1 && cert2 < mu2) break;
+
+        rcoefficients = renewedcos;
+        rcnt ++;
+        if(rcnt > 10000) break;// 無限ループ防止
     }*/
 
+    //cout << rcnt <<  rcoefficients << endl;
     return 0;
 }
