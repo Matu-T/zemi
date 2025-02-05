@@ -587,11 +587,11 @@ void storeVariables(int n, string dataType, vector<map<string, double>> &feat, v
                     feat[i]["egress"] = 0;
                     break;
             }
+        } else{
+            //D2Dの場合どちらも0
+            feat[i]["access"] = 0;
+            feat[i]["egress"] = 0;
         }
-        //D2Dの場合どちらも0
-        feat[i]["access"] = 0;
-        feat[i]["egress"] = 0;
-
         //3.3.6.乗換え回数
         feat[i]["transfer"] = means[i].size() - 1;
 
@@ -718,9 +718,17 @@ int main()
         sfeat[i]["sd"] = (double)preferences[i][0];    
     }
 
-    for(int i = 0; i < afeat.size(); i++){
+    for(int i = 0; i < sfeat.size(); i++){
         cout << "個人:" << i << endl;
-        for(const auto& key: afeat[i]){
+        for(const auto& key: sfeat[i]){
+            cout << key.first << " : " << key.second << " "; 
+        }
+        cout << endl;
+    }
+
+    for(int i = 0; i < rfeat.size(); i++){
+        cout << "個人:" << i << endl;
+        for(const auto& key: rfeat[i]){
             cout << key.first << " : " << key.second << " "; 
         }
         cout << endl;
@@ -730,7 +738,8 @@ int main()
 
     //4.1.SPデータからμ付きパラメータ推定
     //推計に用いる変数
-    vector<string> sfactors = {"car","train","bus","bike","autobus","invehicle","access","transfer","age"};
+    //テストデータでbikeはサンプル数が少ない つまりbikeをパラメータとして導入すると収束しない
+    vector<string> sfactors = {"car","autobus","invehicle","transfer","access"};
     int sclms = sfactors.size();
     double mu1 = 1.0E-4;
     double mu2 = 1.0E-2;
@@ -743,8 +752,8 @@ int main()
 
     Eigen::MatrixXd shessian;
     shessian = MatrixXd::Zero(sclms, sclms);
-    int scnt = 0;
 
+    int scnt = 0;
     while(true){
         //cout << scoefficients << endl;
         //勾配ベクトルの要素 (i,1)
@@ -757,7 +766,7 @@ int main()
                 for(int k = 0; k < sclms; k++){
                     diffs += scoefficients(k,0) * (sfeat[j][sfactors[k]] - rfeat[j][sfactors[k]]);
                 }
-                double qs = 1 / (1 + exp( - (diffs - sfeat[j]["options"])));
+                double qs = 1 / (1 + exp( - (diffs - log(sfeat[j]["options"]))));
                 fac += (sfeat[j]["sd"] - qs) * (sfeat[j][sfactors[i]] - rfeat[j][sfactors[i]]);
             }
             sgradient(i,0) = fac;
@@ -772,24 +781,21 @@ int main()
                     for(int l = 0; l < sclms; l++){
                         diffs += scoefficients(l,0) * (sfeat[k][sfactors[l]] - rfeat[k][sfactors[l]]);
                     }
-                    cout << diffs << endl;
-                    double qs = 1 / (1 + exp( - (diffs - sfeat[k]["options"])));
+                    double qs = 1 / (1 + exp( - (diffs - log(sfeat[k]["options"]))));
                     double ql = 1 - qs;
-                    fac += - ql * qs * (sfeat[k][sfactors[i]] - rfeat[k][sfactors[i]]) * (sfeat[k][sfactors[j]] - rfeat[k][sfactors[j]]);
+                    fac += ql * qs * (sfeat[k][sfactors[i]] - rfeat[k][sfactors[i]]) * (sfeat[k][sfactors[j]] - rfeat[k][sfactors[j]]);
                 }
-                shessian(i,j) = fac;
+                shessian(i,j) = - fac;
             }
         }
-
-
         MatrixXd renewedcos;
-        renewedcos = scoefficients - shessian.colPivHouseholderQr().solve(sgradient);
+        renewedcos = scoefficients - shessian.ldlt().solve(sgradient);
         double cert1 = 0;
         for(int i = 0; i < sclms; i++){
             cert1 += pow(renewedcos(i,0) - scoefficients(i,0), 2.0);
         }
-        cout << "cert1" << cert1 << endl;
-
+        cout << "scnt:" << scnt << endl;
+        cout << "cert1:" << cert1 << endl;
         double cert2 = 0;
         for(int i = 0; i < sclms; i++){
             if(scoefficients(i,0) == 0) continue;//実質的に無限大と見ているのと等しい
@@ -801,11 +807,22 @@ int main()
         scnt ++;
         if(scnt > 100) break;// 無限ループ防止
     }
+
     //検定量の計算も
     cout << scnt <<  scoefficients << endl;
 
+    Eigen::MatrixXd svarcov;
+    svarcov = - shessian;
+    svarcov = svarcov.inverse();
+    for(int i = 0; i < sclms; i++){
+        double t = 0;
+        double temp = (double)svarcov(i,i);
+        t = scoefficients(i,0)/sqrt(svarcov(i,i));
+        cout << "t" << i << ":" << t << endl;
+    }
+
     //4.2.RPどうし比較
-    /*vector<string> rfactors = {"car","train","bus","bike","invehicle","access","transfer","age"};
+    vector<string> rfactors = {"bus","car","invehicle","transfer","access","egress"};
     int rclms = rfactors.size();
 
     Eigen::MatrixXd rcoefficients;
@@ -830,10 +847,12 @@ int main()
                 for(int k = 0; k < rclms; k++){
                     diffs += rcoefficients(k,0) * (afeat[j][rfactors[k]] - rfeat[j][rfactors[k]]);
                 }
-                double pr = 1 / (1 + exp(diffs + rfeat[j]["options"]));
+                double pr = 1 / (1 + exp(diffs + log(rfeat[j]["options"])));
                 fac += (pr - 1) * (afeat[j][rfactors[i]] - rfeat[j][rfactors[i]]);
             }
             rgradient(i,0) = fac;
+            cout << rcnt << "i;" << i << endl;
+            cout << "rgardient\n" << rgradient << endl;
         }   
 
         //ヘッセ行列の要素 (i,j)
@@ -845,17 +864,16 @@ int main()
                     for(int l = 0; l < rclms; l++){
                         diffs += rcoefficients(l,0) * (afeat[k][rfactors[l]] - rfeat[k][rfactors[l]]);
                     }
-                    double pr = 1 / (1 + exp(diffs + rfeat[j]["options"]));
+                    double pr = 1 / (1 + exp(diffs + log(rfeat[j]["options"])));
                     double ps = 1 - pr;
-                    fac += - pr * ps * (afeat[k][rfactors[i]] - rfeat[k][rfactors[i]]) * (afeat[k][rfactors[j]] - rfeat[k][rfactors[j]]);
+                    fac += pr * ps * (afeat[k][rfactors[i]] - rfeat[k][rfactors[i]]) * (afeat[k][rfactors[j]] - rfeat[k][rfactors[j]]);
                 }
-                rhessian(i,j) = fac;
+                rhessian(i,j) = - fac;
             }
         }
 
-
         MatrixXd renewedcos;
-        renewedcos = rcoefficients - rhessian.colPivHouseholderQr().solve(rgradient);
+        renewedcos = rcoefficients - rhessian.ldlt().solve(rgradient);
         double cert1 = 0;
         for(int i = 0; i < rclms; i++){
             cert1 += pow(renewedcos(i,0) - rcoefficients(i,0), 2.0);
@@ -870,9 +888,21 @@ int main()
 
         rcoefficients = renewedcos;
         rcnt ++;
-        if(rcnt > 10000) break;// 無限ループ防止
-    }*/
+        if(rcnt > 100) break;// 無限ループ防止
+    }
 
-    //cout << rcnt <<  rcoefficients << endl;
+    cout << rcnt <<  rcoefficients << endl;
+
+    Eigen::MatrixXd rvarcov;
+    rvarcov = - rhessian;
+    cout << rhessian << endl;
+    rvarcov = rvarcov.inverse();
+    for(int i = 0; i < rclms; i++){
+        double t = 0;
+        double temp = (double)rvarcov(i,i);
+        cout << temp << endl;
+        t = rcoefficients(i,0)/sqrt(rvarcov(i,i));
+        cout << "t" << i << ":" << t << endl;
+    }
     return 0;
 }
