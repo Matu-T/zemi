@@ -821,7 +821,51 @@ int main()
         cout << "t" << i << ":" << t << endl;
     }
 
+    double slc = 0;
+    for(int i = 0; i < n; i++){
+        slc += sfeat[i]["sd"] * log(1/(1+exp(-scoefficients(1,0) + log(sfeat[i]["options"])))) + (1 - sfeat[i]["sd"]) *  log(1/(1+exp(scoefficients(1,0) - log(sfeat[i]["options"]))));
+    }
+
+    double smaxl = 0;
+    for(int i = 0; i < n; i++){
+        double diffs = 0;
+        for(int j = 0; j < sclms; j ++){
+            diffs += scoefficients(j,0) * (sfeat[i][sfactors[j]] - rfeat[i][sfactors[j]]);
+        }
+        smaxl += sfeat[i]["sd"] * log(1/(1+exp(-diffs + log(sfeat[i]["options"])))) + (1 - sfeat[i]["sd"]) * log(1/(1+exp(diffs - log(sfeat[i]["options"]))));
+    }
+
+    double schi0 = -2 * ( - n * log(2) - smaxl);
+    double schic = -2 * (slc - smaxl);
+
+    double scnt1 = 0;
+    double scnt2 = 0;
+    for(int i = 0; i < n; i++){
+        double diffs = 0;
+        for(int j = 0; j < sclms; j ++){
+            diffs += scoefficients(j,0) * (sfeat[i][sfactors[j]] - rfeat[i][sfactors[j]]);
+        }
+        double qs = 1/(1+exp(-diffs + log(sfeat[i]["options"])));
+        if(qs >= 0.5 && sfeat[i]["sd"] == 1 || qs < 0.5 && sfeat[i]["sd"] == 0) scnt1 ++;
+        double qr = 1/(1+exp(diffs - log(sfeat[i]["options"])));
+        if(qr >= 0.5 && sfeat[i]["sd"] == 0 || qr < 0.5 && sfeat[i]["sd"] == 1) scnt2 ++;
+    }
+    double srho = 1 - smaxl / (- n * log(2));
+
+    cout << "N:" << n << endl;
+    cout << "L(0):" << - n * log(2) << endl;
+    cout << "L(c):" << slc << endl;
+    cout << "L(θ):" << smaxl << endl;
+    cout << "χ^2_0:" << schi0 << endl;
+    cout << "χ^2_c:" << schic << endl;
+    cout << "hitr1:" << scnt1 / n << endl;
+    cout << "hitr2:" << scnt2 / n << endl;
+    cout << "hitr:" << (scnt1 + scnt2) / (2 * n) << endl;
+    cout << "ρ^2:" << srho << endl;
+    cout << "ρ^2(bar):" << (n-sclms) * srho / n<< endl;
+
     //4.2.RPどうし比較
+    //autobus定数項抜く
     vector<string> rfactors = {"bus","car","invehicle","transfer","access","egress"};
     int rclms = rfactors.size();
 
@@ -904,5 +948,49 @@ int main()
         t = rcoefficients(i,0)/sqrt(rvarcov(i,i));
         cout << "t" << i << ":" << t << endl;
     }
+
+    double rlc = 0;
+    for(int i = 0; i < n; i++){
+        rlc += log(1/(1+exp(rcoefficients(1,0) - log(rfeat[i]["options"]))));
+    }
+
+    double rmaxl = 0;
+    for(int i = 0; i < n; i++){
+        double diffs = 0;
+        for(int j = 0; j < sclms; j ++){
+            diffs += rcoefficients(j,0) * (afeat[i][rfactors[j]] - rfeat[i][rfactors[j]]);
+        }
+        rmaxl += log(1/(1+exp(diffs - log(rfeat[i]["options"]))));
+    }
+
+    double rchi0 = -2 * ( - n * log(2) - rmaxl);
+    double rchic = -2 * (rlc - rmaxl);
+
+    double rcnt1 = 0;
+    double rcnt2 = 0;
+    for(int i = 0; i < n; i++){
+        double diffs = 0;
+        for(int j = 0; j < rclms; j ++){
+            diffs += rcoefficients(j,0) * (afeat[i][rfactors[j]] - rfeat[i][rfactors[j]]);
+        }
+        double pa = 1/(1+exp(-diffs - log(rfeat[i]["options"])));
+        if(pa < 0.5) rcnt1 ++;
+        double pr = 1/(1+exp(diffs + log(rfeat[i]["options"])));
+        if(pr >= 0.5) rcnt2 ++;
+    }
+    double rrho = 1 - rmaxl / (- n * log(2));
+
+    cout << "N:" << n << endl;
+    cout << "L(0):" << - n * log(2) << endl;
+    cout << "L(c):" << rlc << endl;
+    cout << "L(θ):" << rmaxl << endl;
+    cout << "χ^2_0:" << rchi0 << endl;
+    cout << "χ^2_c:" << rchic << endl;
+    cout << "hitr1:" << rcnt1 / n << endl;
+    cout << "hitr2:" << rcnt2 / n << endl;
+    cout << "hitr:" << (rcnt1 + rcnt2) / (2 * n) << endl;
+    cout << "ρ^2:" << rrho << endl;
+    cout << "ρ^2(bar):" << (n-rclms) * rrho / n<< endl;
+
     return 0;
 }
