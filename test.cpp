@@ -712,37 +712,39 @@ int main()
     //SP autonomous
     storeVariables(n,"stated",sfeat,data.statedX,data.statedY,data.statedMeans);
     //SP 選好結果
-    vector<vector<int>> preferences; //一次元配列でもよい
-    LoadFile("statedIntentions.csv", "int", preferences);
+    vector<vector<int>> statedpreferences; //一次元配列でもよい
+    LoadFile("statedIntentions.csv", "int", statedpreferences);
     for(int i = 0; i < n; i++){
-        sfeat[i]["sd"] = (double)preferences[i][0];    
+        sfeat[i]["sd"] = (double)statedpreferences[i][0];    
     }
+    vector<vector<int>> revealedpreferences; //一次元配列でもよい
+    LoadFile("revealedIntentions.csv", "int", revealedpreferences);
+    for(int i = 0; i < n; i++){
+        afeat[i]["rd"] = (double)revealedpreferences[i][0];    
+    }
+  
 
-    for(int i = 0; i < sfeat.size(); i++){
+    for(int i = 0; i < afeat.size(); i++){
         cout << "個人:" << i << endl;
-        for(const auto& key: sfeat[i]){
+        for(const auto& key: afeat[i]){
             cout << key.first << " : " << key.second << " "; 
         }
         cout << endl;
     }
 
-    for(int i = 0; i < rfeat.size(); i++){
-        cout << "個人:" << i << endl;
-        for(const auto& key: rfeat[i]){
-            cout << key.first << " : " << key.second << " "; 
-        }
-        cout << endl;
-    }
 
     //4.モデルの推計
 
     //4.1.SPデータからμ付きパラメータ推定
     //推計に用いる変数
     //テストデータでbikeはサンプル数が少ない つまりbikeをパラメータとして導入すると収束しない
-    vector<string> sfactors = {"car","autobus","invehicle","transfer","access"};
+    //順番は(RPSP共通特性) -> (SP特有特性)　-> (自動運転定数項autobus)
+    vector<string> sfactors = {"car","invehicle","cost","access","autobus"};
     int sclms = sfactors.size();
-    double mu1 = 1.0E-4;
-    double mu2 = 1.0E-2;
+    //RSSP共通特性
+    int rscommon  = 4;
+    double teststat1 = 1.0E-4;
+    double teststat2 = 1.0E-2;
 
     Eigen::MatrixXd scoefficients;
     scoefficients = MatrixXd::Zero(sclms, 1);//最初のパラメータ初期値は0
@@ -755,7 +757,6 @@ int main()
 
     int scnt = 0;
     while(true){
-        //cout << scoefficients << endl;
         //勾配ベクトルの要素 (i,1)
         for(int i = 0; i < sclms; i++){
             double fac = 0;
@@ -801,7 +802,7 @@ int main()
             if(scoefficients(i,0) == 0) continue;//実質的に無限大と見ているのと等しい
             cert2 += (renewedcos(i,0) - scoefficients(i,0)) / scoefficients(i,0);
         }
-        if(sqrt(cert1) / sclms < mu1 && cert2 < mu2) break;
+        if(sqrt(cert1) / sclms < teststat1 && cert2 < teststat2) break;
 
         scoefficients = renewedcos;
         scnt ++;
@@ -866,7 +867,8 @@ int main()
 
     //4.2.RPどうし比較
     //autobus定数項抜く
-    vector<string> rfactors = {"bus","car","invehicle","transfer","access","egress"};
+    //始めは必ずspで、2個目以降はRPデータにユニークな変数
+    vector<string> rfactors = {"sp","walktime","egress"};
     int rclms = rfactors.size();
 
     Eigen::MatrixXd rcoefficients;
@@ -878,6 +880,16 @@ int main()
     Eigen::MatrixXd rhessian;
     rhessian = MatrixXd::Zero(rclms, rclms);
     int rcnt = 0;
+
+    //STEP2(RPモデルどうしの推計の準備)
+    for(int i = 0; i < n; i++){
+        afeat[i]["sp"] = 0;
+        rfeat[i]["sp"] = 0;
+        for(int j = 0; j < rscommon; j++){
+            afeat[i]["sp"] += scoefficients(j,0) * afeat[i][sfactors[j]];
+            rfeat[i]["sp"] += scoefficients(j,0) * rfeat[i][sfactors[j]]; 
+        }
+    }
 
     while(true){
         //cout << rcoefficients << endl;
@@ -891,26 +903,24 @@ int main()
                 for(int k = 0; k < rclms; k++){
                     diffs += rcoefficients(k,0) * (afeat[j][rfactors[k]] - rfeat[j][rfactors[k]]);
                 }
-                double pr = 1 / (1 + exp(diffs + log(rfeat[j]["options"])));
-                fac += (pr - 1) * (afeat[j][rfactors[i]] - rfeat[j][rfactors[i]]);
+                double pa = 1 / (1 + exp( - (diffs + log(rfeat[j]["options"]))));
+                fac += (afeat[i]["rd"] - pa) * (afeat[j][rfactors[i]] - rfeat[j][rfactors[i]]);
             }
             rgradient(i,0) = fac;
-            cout << rcnt << "i;" << i << endl;
-            cout << "rgardient\n" << rgradient << endl;
         }   
 
         //ヘッセ行列の要素 (i,j)
         for(int i = 0; i < rclms; i++){
             for(int j = 0; j < rclms; j++){
                 double fac = 0;
-                for(int k = 0; k < n; k ++){
+                for(int k = 0; k < n; k++){
                     double diffs = 0; //θ'(X_sn - X_rn)の計算
                     for(int l = 0; l < rclms; l++){
                         diffs += rcoefficients(l,0) * (afeat[k][rfactors[l]] - rfeat[k][rfactors[l]]);
                     }
-                    double pr = 1 / (1 + exp(diffs + log(rfeat[j]["options"])));
-                    double ps = 1 - pr;
-                    fac += pr * ps * (afeat[k][rfactors[i]] - rfeat[k][rfactors[i]]) * (afeat[k][rfactors[j]] - rfeat[k][rfactors[j]]);
+                    double pa = 1 / (1 + exp( - ( diffs + log(rfeat[j]["options"]))));
+                    double pr = 1 - pa;
+                    fac += pr * pa * (afeat[k][rfactors[i]] - rfeat[k][rfactors[i]]) * (afeat[k][rfactors[j]] - rfeat[k][rfactors[j]]);
                 }
                 rhessian(i,j) = - fac;
             }
@@ -928,9 +938,10 @@ int main()
             if(rcoefficients(i,0) == 0) continue;//実質的に無限大と見ているのと等しい
             cert2 += (renewedcos(i,0) - rcoefficients(i,0)) / rcoefficients(i,0);
         }
-        if(sqrt(cert1) / rclms < mu1 && cert2 < mu2) break;
+        if(sqrt(cert1) / rclms < teststat1 && cert2 < teststat2) break;
 
         rcoefficients = renewedcos;
+        cout << "rco:" << rcoefficients << endl;
         rcnt ++;
         if(rcnt > 100) break;// 無限ループ防止
     }
@@ -944,20 +955,19 @@ int main()
     for(int i = 0; i < rclms; i++){
         double t = 0;
         double temp = (double)rvarcov(i,i);
-        cout << temp << endl;
         t = rcoefficients(i,0)/sqrt(rvarcov(i,i));
         cout << "t" << i << ":" << t << endl;
     }
 
     double rlc = 0;
     for(int i = 0; i < n; i++){
-        rlc += log(1/(1+exp(rcoefficients(1,0) - log(rfeat[i]["options"]))));
+        rlc += afeat[i]["rd"] * log(1/(1+exp(rcoefficients(0,0) - log(rfeat[i]["options"]))));
     }
 
     double rmaxl = 0;
     for(int i = 0; i < n; i++){
         double diffs = 0;
-        for(int j = 0; j < sclms; j ++){
+        for(int j = 0; j < rclms; j ++){
             diffs += rcoefficients(j,0) * (afeat[i][rfactors[j]] - rfeat[i][rfactors[j]]);
         }
         rmaxl += log(1/(1+exp(diffs - log(rfeat[i]["options"]))));
@@ -974,9 +984,9 @@ int main()
             diffs += rcoefficients(j,0) * (afeat[i][rfactors[j]] - rfeat[i][rfactors[j]]);
         }
         double pa = 1/(1+exp(-diffs - log(rfeat[i]["options"])));
-        if(pa < 0.5) rcnt1 ++;
+        if(pa >= 0.5 && afeat[i]["rd"] == 1 || pa < 0.5 && afeat[i]["rd"] == 0) rcnt1 ++;
         double pr = 1/(1+exp(diffs + log(rfeat[i]["options"])));
-        if(pr >= 0.5) rcnt2 ++;
+        if(pr >= 0.5 && afeat[i]["rd"] == 0 || pr < 0.5 && afeat[i]["rd"] == 1) rcnt2 ++;
     }
     double rrho = 1 - rmaxl / (- n * log(2));
 
@@ -991,6 +1001,191 @@ int main()
     cout << "hitr:" << (rcnt1 + rcnt2) / (2 * n) << endl;
     cout << "ρ^2:" << rrho << endl;
     cout << "ρ^2(bar):" << (n-rclms) * rrho / n<< endl;
+
+    //rcoefficients(0,0) = λ 逆数はμ これが0から1の間に収まらない問題
+    double mu = 1 / rcoefficients(0,0);
+    cout << "mu:" << mu << endl;
+    //便宜的
+    mu = 1;
+    Eigen::MatrixXd newscoeff;
+    newscoeff = MatrixXd::Zero(sclms, 1);
+    //β(bar), γ(bar)
+    for(int i = 0; i < sclms - 1; i++){
+        newscoeff(i,0) = scoefficients(i,0) / mu;
+    }
+
+    //step3
+    //ここではcfeat1をQ(s)-subwayとP(a)-alternate
+    //cfeat2をQ(r)-regularとP(r)-regularとしてプールする
+    vector<map<string, double>> cfeat1(2*n);
+    vector<map<string, double>> cfeat2(2*n);
+    for(int i = 0; i < n; i++){
+        for(const auto& key: sfeat[i]){
+            cfeat1[i][key.first] = mu * sfeat[i][key.first];
+        }
+        cfeat1[i]["d"] = sfeat[i]["sd"];
+        cfeat1[i]["options"] = sfeat[i]["options"];
+    }
+    for(int i = 0; i < n; i++){
+        for(const auto& key: afeat[i]){
+            cfeat1[i + n][key.first] = afeat[i][key.first];
+        }
+        cfeat1[i + n]["d"] = afeat[i]["rd"];
+        cfeat1[i + n]["options"] = afeat[i]["options"];
+    }
+    for(int i = 0; i < n; i++){
+        for(const auto& key: rfeat[i]){
+            cfeat2[i][key.first] = rfeat[i][key.first];
+        }
+        cfeat2[i]["options"] = rfeat[i]["options"];
+    }
+    for(int i = 0; i < n; i++){
+        for(const auto& key: rfeat[i]){
+            cfeat2[i + n][key.first] = rfeat[i][key.first];
+        }
+        cfeat2[i + n]["options"] = rfeat[i]["options"];
+    }
+
+    //4.3.再計算
+    //順番は統一を保つためβ,γ,autobus,α
+    vector<string> cfactors;
+    for(int i = 0; i < sclms; i++){
+        cfactors.emplace_back(sfactors[i]);
+    }
+    //最初はλ項なので抜く
+    for(int i = 1; i < rclms; i++){
+        cfactors.emplace_back(rfactors[i]);
+    }
+    int cclms = cfactors.size();
+    for(int i = 0; i < cclms; i++){
+        cout << cfactors[i] << endl;
+    }
+
+    Eigen::MatrixXd ccoefficients;
+    ccoefficients = MatrixXd::Zero(cclms, 1);//最初のパラメータ初期値は0
+
+    Eigen::MatrixXd cgradient;
+    cgradient = MatrixXd::Zero(cclms, 1);
+
+    Eigen::MatrixXd chessian;
+    chessian = MatrixXd::Zero(cclms, cclms);
+    int ccnt = 0;
+
+    while(true){
+        //勾配ベクトルの要素 (i,1)
+        for(int i = 0; i < cclms; i++){
+            double fac = 0;
+            //個人 j
+            for(int j = 0; j < 2*n; j++){
+                double diffs = 0; //θ'(X_sn - X_rn)の計算
+                //属性 k (インデックス cfactors[k]と対応)
+                for(int k = 0; k < cclms; k++){
+                    diffs += ccoefficients(k,0) * (cfeat1[j][cfactors[k]] - cfeat2[j][cfactors[k]]);
+                }
+                //cout << "i:" << i << "j:" << j << endl;
+
+                double pa = 1 / (1 + exp( - (diffs + log(cfeat2[j]["options"]))));
+                fac += (cfeat1[i]["d"] - pa) * (cfeat1[j][cfactors[i]] - cfeat2[j][cfactors[i]]);
+            }
+            cgradient(i,0) = fac;
+        }   
+
+        //ヘッセ行列の要素 (i,j)
+        for(int i = 0; i < cclms; i++){
+            for(int j = 0; j < cclms; j++){
+                double fac = 0;
+                for(int k = 0; k < 2*n; k++){
+                    double diffs = 0; //θ'(X_sn - X_rn)の計算
+                    for(int l = 0; l < cclms; l++){
+                        diffs += ccoefficients(l,0) * (cfeat1[k][cfactors[l]] - cfeat2[k][cfactors[l]]);
+                    }
+                    double pa = 1 / (1 + exp( - ( diffs + log(cfeat2[j]["options"]))));
+                    double pr = 1 - pa;
+                    fac += pr * pa * (cfeat1[k][cfactors[i]] - cfeat2[k][cfactors[i]]) * (cfeat1[k][cfactors[j]] - cfeat2[k][cfactors[j]]);
+                }
+                chessian(i,j) = - fac;
+            }
+        }
+        //cout <<"gradient:\n" << cgradient << endl;
+        //cout <<"hessian\n" << chessian << endl;
+
+        MatrixXd renewedcos;
+        renewedcos = ccoefficients - chessian.ldlt().solve(cgradient);
+        double cert1 = 0;
+        for(int i = 0; i < cclms; i++){
+            cert1 += pow(renewedcos(i,0) - ccoefficients(i,0), 2.0);
+        }
+        cout << "c1:" <<  cert1 << endl;
+
+
+        double cert2 = 0;
+        for(int i = 0; i < cclms; i++){
+            if(ccoefficients(i,0) == 0) continue;//実質的に無限大と見ているのと等しい
+            cert2 += (renewedcos(i,0) - ccoefficients(i,0)) / ccoefficients(i,0);
+        }
+        if(sqrt(cert1) / cclms < teststat1 && cert2 < teststat2) break;
+
+        ccoefficients = renewedcos;
+        ccnt ++;
+        if(ccnt > 50) break;// 無限ループ防止
+    }
+
+    cout << ccnt <<  ccoefficients << endl;
+
+    Eigen::MatrixXd cvarcov;
+    cvarcov = - chessian;
+    cout << chessian << endl;
+    cvarcov = cvarcov.inverse();
+    for(int i = 0; i < cclms; i++){
+        double t = 0;
+        double temp = (double)cvarcov(i,i);
+        t = ccoefficients(i,0)/sqrt(cvarcov(i,i));
+        cout << "t" << i << ":" << t << endl;
+    }
+
+    double clc = 0;
+    for(int i = 0; i < 2 * n; i++){
+        clc += cfeat1[i]["d"] * log(1/(1+exp(ccoefficients(0,0) - log(cfeat2[i]["options"]))));
+    }
+
+    double cmaxl = 0;
+    for(int i = 0; i < 2 * n; i++){
+        double diffs = 0;
+        for(int j = 0; j < cclms; j ++){
+            diffs += ccoefficients(j,0) * (cfeat1[i][cfactors[j]] - cfeat2[i][cfactors[j]]);
+        }
+        cmaxl += log(1/(1+exp(diffs - log(cfeat2[i]["options"]))));
+    }
+
+    double cchi0 = -2 * ( - 2 * n * log(2) - cmaxl);
+    double cchic = -2 * (clc - cmaxl);
+
+    double ccnt1 = 0;
+    double ccnt2 = 0;
+    for(int i = 0; i < 2 * n; i++){
+        double diffs = 0;
+        for(int j = 0; j < cclms; j ++){
+            diffs += ccoefficients(j,0) * (cfeat1[i][cfactors[j]] - cfeat2[i][cfactors[j]]);
+        }
+        double pa = 1/(1+exp(-diffs - log(cfeat2[i]["options"])));
+        if(pa >= 0.5 && cfeat1[i]["d"] == 1 || pa < 0.5 && cfeat1[i]["d"] == 0) ccnt1 ++;
+        double pr = 1/(1+exp(diffs + log(cfeat2[i]["options"])));
+        if(pr >= 0.5 && cfeat1[i]["d"] == 0 || pr < 0.5 && cfeat1[i]["d"] == 1) ccnt2 ++;
+    }
+    double crho = 1 - cmaxl / (- 2 * n * log(2));
+
+    cout << "N:" << 2 * n << endl;
+    cout << "L(0):" << -2 * n * log(2) << endl;
+    cout << "L(c):" << clc << endl;
+    cout << "L(θ):" << cmaxl << endl;
+    cout << "χ^2_0:" << cchi0 << endl;
+    cout << "χ^2_c:" << cchic << endl;
+    cout << "hitr1:" << ccnt1 / (2 * n) << endl;
+    cout << "hitr2:" << ccnt2 / (2 * n) << endl;
+    cout << "hitr:" << (ccnt1 + ccnt2) / (4 * n) << endl;
+    cout << "ρ^2:" << rrho << endl;
+    cout << "ρ^2(bar):" << (2 * n - cclms) * rrho / 2 * n<< endl;
+
 
     return 0;
 }
