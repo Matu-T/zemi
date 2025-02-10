@@ -276,6 +276,7 @@ T ConvertValue(const string& value){
     return T{};
 }
 
+//2次元配列で格納
 template<typename T>
 void LoadFile (string fileName, string type, vector<vector<T>>& vec){
     ifstream file(fileName); // CSVファイルを開く
@@ -390,6 +391,61 @@ void LoadFileAsMap (string fileName, string type, vector<map<string, double>>& m
     }
 
 }
+
+void LoadFileAsPair (string fileName, vector<pair<double, double>>& v){
+    ifstream file(fileName); // CSVファイルを開く
+    string line; // 行を格納する変数
+
+    // ファイルが開けたか確認
+    if (file.is_open()) {
+        while (getline(file, line)) { // 行を1行ずつ読み込む
+            stringstream ss(line); // 行をストリームに変換
+            string x;
+            string y;
+
+            getline(ss, x, ',');
+            getline(ss, y, ',');
+            try{
+                v.emplace_back(make_pair(stod(x), stod(y)));
+            } catch (const invalid_argument& e) {
+                //cerr << "変換エラー: " << x << endl;
+                //cerr << "変換エラー: " << y << endl;
+            } catch (const out_of_range& e) {
+                cerr << "範囲外です: " << x << endl;
+                cerr << "範囲外です: " << y << endl;
+            }
+        }
+        file.close(); // ファイルを閉じる
+    } else {
+        std::cerr << "ファイルを開けませんでした。" << std::endl; // エラーメッセージ
+    }
+}
+
+void LoadFileAsVec (string fileName, vector<int>& v){
+    ifstream file(fileName); // CSVファイルを開く
+    string line; // 行を格納する変数
+
+    // ファイルが開けたか確認
+    if (file.is_open()) {
+        while (getline(file, line)) { // 行を1行ずつ読み込む
+            stringstream ss(line); // 行をストリームに変換
+            string val;
+
+            getline(ss, val, ',');
+            try{
+                v.emplace_back(val);
+            } catch (const invalid_argument& e) {
+                //cerr << "変換エラー: " << val << endl;
+            } catch (const out_of_range& e) {
+                cerr << "範囲外です: " << val << endl;
+            }
+        }
+        file.close(); // ファイルを閉じる
+    } else {
+        std::cerr << "ファイルを開けませんでした。" << std::endl; // エラーメッセージ
+    }
+}
+
 
 void storeVariables(int n, string dataType, vector<map<string, double>> &feat, vector<vector<double>>& x, vector<vector<double>>& y, vector<vector<int>>& means){
     //3.1.運賃体系の入力
@@ -1187,5 +1243,73 @@ int main()
     cout << "ρ^2(bar):" << (2 * n - cclms) * rrho / 2 * n<< endl;
 
 
+    //5.将来値の予測
+    //x軸は縦方向とする
+    double xmax = 2;
+    double ymax = 3;
+    //メッシュの一辺長
+    double unit = 0.25;
+    int zones = (xmax - unit) * (ymax - unit);
+
+    vector<pair<double, double>> bus_route;
+    vector<int> bus_hasspot;
+    vector<int> bus_nearest;
+    LoadFileAsPair("busroute.csv",bus_route);
+    LoadFileAsVec("bushasspot.csv",bus_hasspot);
+    LoadFileAsVec("busnearest.csv",bus_nearest);
+
+    //連想配列の配列aggrはaggr[i]["str"]でゾーンiの変数（属性）strの平均値を表す
+    vector<map<string, double>> aggr(zones);
+
+    map<double, double> autobusFarebd;
+    LoadFileAsFare("autobusFarebd.csv", autobusFarebd);
+
+    for(int i = 0; i < zones; i++){
+        //5.1.access
+        if(bus_hasspot[i]){
+            //1.05はルートファクター
+            aggr[i]["access"] = 1.05 * unit / (2 * bus_hasspot[i]);
+        } else{
+            //ゾーン内にspotが無い場合
+            int res = i % 12;
+            int quot = i / 12;
+            double centerx = unit * (quot + 0.5);
+            double centery = unit * (res + 0.5);
+            int nearest = bus_nearest[i];
+            aggr[i]["access"] = 1.05 * sqrt(pow(centerx - bus_route[nearest].first, 2.0) + pow(centery - bus_route[nearest].second, 2.0));
+        }
+
+        //5.2.time関連
+        double a = aggr[i]["access"];
+        double dist = 1.2 * sqrt(2) * min(xmax, ymax) + (pow(a, 2.0))/(sqrt(2) * min(xmax, ymax)) - 2 * a;
+        aggr[i]["invehicle"] = dist / 20;
+        aggr[i]["walktime"] = a / 4.5;
+        aggr[i]["time"] = aggr[i]["invehicle"] + aggr[i]["walktime"];
+
+        //5.3.その他
+        for(const auto& j : autobusFarebd){
+            aggr[i]["cost"] = j.second;
+            if(dist < j.first) break;
+        }
+        aggr[i]["transfer"] = 1;
+        aggr[i]["trainAvailable"] = 0;
+        aggr[i]["egress"] = 0;
+        aggr[i]["age"] = 0.5;
+        //以下の数字は便宜的
+        aggr[i]["licenseCar"] = 0.33;
+        aggr[i]["licenseBike"] = 0.15;
+        //特にautobusは徒歩との分担率の配分が難しい
+        aggr[i]["autobus"] = 1;
+        double opt = 8;
+        opt -= rfeat[i]["licenseCar"];
+        opt -= rfeat[i]["licenseBike"];
+        opt -= rfeat[i]["trainAvailable"];
+        if(rfeat[i]["licenseCar"] == 0) opt --;
+        if(rfeat[i]["licenseBike"] == 0) opt --;
+        if(rfeat[i]["trainAvailable"] == 0) opt --;
+
+        rfeat[i]["options"] = opt;
+    }
+    //変数が重複するので構造体の検討を
     return 0;
 }
