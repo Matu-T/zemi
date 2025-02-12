@@ -165,7 +165,7 @@ public:
     }
 };
 
-//バス
+//自動運転バス
 struct Autobus : Transp
 {
 public:
@@ -250,6 +250,7 @@ public:
     }
 };
 
+//モデル推計に用いるデータ
 struct DataSet {
     vector<vector<double>> revealedX;
     vector<vector<double>> revealedY;
@@ -260,6 +261,23 @@ struct DataSet {
     vector<vector<double>> alternateX;
     vector<vector<double>> alternateY;
     vector<vector<int>> alternateMeans;
+};
+
+//将来値推定に使うデータ
+struct EstimationData {
+    //連想配列の配列closeはclose[i]["str"]でゾーンiの変数（属性）strの平均値を表す
+    vector<map<string, double>> close;//近い距離を移動する際の自動運転バスの特性を格納
+    vector<map<string, double>> far;//遠い距離 電車と自動運転バス 「電車のみ」は含めない
+    vector<map<string, double>> ctaxi;//close_taxi
+    vector<map<string, double>> ftaxi;//far_taxi
+    vector<map<string, double>> cbicycle;//close_bicycle
+    vector<map<string, double>> cmotor;//close_motor
+    vector<map<string, double>> fmotor;//far_motor
+    vector<map<string, double>> ccar;//close_car
+    vector<map<string, double>> fcar;//far_car
+    double bicycle;//自転車のみ利用可能な人数の割合
+    double motor;//バイクが利用可能
+    double car;//自動車が利用可能
 };
 
 template<typename T>
@@ -736,6 +754,7 @@ void storeVariables(int n, string dataType, vector<map<string, double>> &feat, v
         if(feat[i]["licenseCar"] == 0) opt --;
         if(feat[i]["licenseBike"] == 0) opt --;
         if(feat[i]["trainAvailable"] == 0) opt --;
+        if(feat[i]["bicyclevailable"] == 0) opt --;
         if(dataType == "revealed") opt --;
 
         feat[i]["options"] = opt;
@@ -1295,8 +1314,8 @@ int main()
     LoadFileAsVec("busnearest.csv",bus_nearest);
     LoadFileAsVec("closetrip.csv",close_trip);
 
-    //連想配列の配列closeはclose[i]["str"]でゾーンiの変数（属性）strの平均値を表す
-    vector<map<string, double>> close(zones);
+    EstimationData est;
+    est.close.resize(zones);
 
     map<double, double> autobusFarebd;
     LoadFileAsFare("autobusFarebd.csv", autobusFarebd);
@@ -1305,7 +1324,7 @@ int main()
         //5.1.access
         if(bus_hasspot[i]){
             //1.05はルートファクター
-            close[i]["access"] = 1.05 * unit / (2 * bus_hasspot[i]);
+            est.close[i]["access"] = 1.05 * unit / (2 * bus_hasspot[i]);
         } else{
             //ゾーン内にspotが無い場合
             int res = i % 12;
@@ -1313,39 +1332,68 @@ int main()
             double centerx = unit * (quot + 0.5);
             double centery = unit * (res + 0.5);
             int nearest = bus_nearest[i];
-            close[i]["access"] = 1.05 * sqrt(pow(centerx - bus_route[nearest].first, 2.0) + pow(centery - bus_route[nearest].second, 2.0));
+            est.close[i]["access"] = 1.05 * sqrt(pow(centerx - bus_route[nearest].first, 2.0) + pow(centery - bus_route[nearest].second, 2.0));
         }
 
         //5.2.time関連
-        double a = close[i]["access"];
+        double a = est.close[i]["access"];
+        //distは自動運転バスに乗っている距離
         double dist = 1.2 * sqrt(2) * min(xmax, ymax) + (pow(a, 2.0))/(sqrt(2) * min(xmax, ymax)) - 2 * a;
-        close[i]["invehicle"] = dist / 20;
-        close[i]["walktime"] = a / 4.5;
-        close[i]["time"] = close[i]["invehicle"] + close[i]["walktime"];
+        est.close[i]["invehicle"] = dist / 20;
+        est.close[i]["walktime"] = a / 4.5;
+        est.close[i]["time"] = est.close[i]["invehicle"] + est.close[i]["walktime"];
 
         //5.3.その他
         for(const auto& j : autobusFarebd){
-            close[i]["cost"] = j.second;
+            est.close[i]["cost"] = j.second;
             if(dist < j.first) break;
         }
-        close[i]["transfer"] = 1;
-        close[i]["trainAvailable"] = 0;
-        close[i]["egress"] = 0;
-        close[i]["age"] = 0.5;
-        //以下の数字は便宜的
-        close[i]["licenseCar"] = 0.33;
-        close[i]["licenseBike"] = 0.15;
-        //特にautobusは徒歩との分担率の配分が難しい
-        close[i]["autobus"] = 1;
-        double opt = 8;
-        opt -= (1 - close[i]["licenseCar"]);
-        opt -= (1 - close[i]["licenseBike"]);
-        opt -= ( 1- close[i]["trainAvailable"]);
-        close[i]["options"] = opt;
+        est.close[i]["transfer"] = 1;
+        est.close[i]["egress"] = 0;
+        est.close[i]["age"] = 0.5;
 
-        close[i]["trip"] = close_trip[i];
+        est.close[i]["trip"] = close_trip[i];
     }
 
+    //5.4.セグメントごとの短距離輸送分担予測
+    //5.4.1.✕
+    map<double, double> taxiFarebd;
+    LoadFileAsFare("taxiFarebd.csv", taxiFarebd);
+    est.close.resize(zones);
+
+    double close_taxi_cost = 0;
+
+    for(const auto& i : taxiFarebd){
+        close_taxi_cost = i.second;
+        if(min(xmax, ymax) < i.first) break;
+    }
+
+    for(int i = 0; i < zones; i++){
+        //est.closeの特性の更新
+        est.close[i]["licenseCar"] = 0;
+        est.close[i]["licenseBike"] = 0;
+        est.close[i]["trainAvailable"] = 0;
+        est.close[i]["bicycleAvailable"] = 0;
+        est.close[i]["autobus"] = 1;
+        //バスの重複を削除しているので選択肢母数は7
+        est.close[i]["options"] = 3;
+
+        //ctaxiの特性の計算
+        est.ctaxi[i]["access"] = 0;
+        est.ctaxi[i]["invehicle"] = 0;
+        est.ctaxi[i]["walktime"] = 0;
+        est.ctaxi[i]["time"] = 1.2 * min(xmax, ymax) / 40;//新たに計算する必要はない…
+        est.ctaxi[i]["cost"] = close_taxi_cost;
+        est.ctaxi[i]["transfer"] = 0;
+        est.close[i]["egress"] = 0;
+        est.close[i]["age"] = 0.5;
+
+    }
+    
+
+
+
+    //5.n.長距離輸送
     //同じことを長距離輸送についても行う 鉄道でなくても長距離輸送であれば代用可
     vector<pair<double, double>> train_route;
     vector<pair<int, int>> train_access;
@@ -1359,16 +1407,16 @@ int main()
     LoadFileAsVec("fartrip.csv",far_trip);
     
     //鉄道を使う場合の平均移動距離
-    double train_length = 20;
+    double far_length = 20;
 
-    vector<map<string, double>> far(zones);
+    est.far.resize(zones);
     map<double, double> trainFarebd;
     LoadFileAsFare("trainFarebd.csv", trainFarebd);
 
     for(int i = 0; i < zones; i++){
         if(bus_hasspot[i]){
             //「自動運転バスを（必ず）使う場合なのでtrain_hasspotではない
-            far[i]["access"] = 1.05 * unit / (2 * bus_hasspot[i]);
+            est.far[i]["access"] = 1.05 * unit / (2 * bus_hasspot[i]);
         } else{
             //ゾーン内にspotが無い場合
             int res = i % 12;
@@ -1376,7 +1424,7 @@ int main()
             double centerx = unit * (quot + 0.5);
             double centery = unit * (res + 0.5);
             int nearest = bus_nearest[i];
-            far[i]["access"] = 1.05 * sqrt(pow(centerx - bus_route[nearest].first, 2.0) + pow(centery - bus_route[nearest].second, 2.0));
+            est.far[i]["access"] = 1.05 * sqrt(pow(centerx - bus_route[nearest].first, 2.0) + pow(centery - bus_route[nearest].second, 2.0));
         }
         double ta = 0;
         if(train_hasspot[i]){
@@ -1391,17 +1439,17 @@ int main()
             ta = 1.05 * sqrt(pow(centerx - train_route[nearest].first, 2.0) + pow(centery - train_route[nearest].second, 2.0));
         }
 
-        double a = far[i]["access"];
+        double a = est.far[i]["access"];
         int si = train_access[i].first;
         int gi = train_access[i].second;
         double b = sqrt(pow(bus_route[si].first - bus_route[gi].first, 2.0) + pow(bus_route[si].second - bus_route[gi].second, 2.0));
-        double dist = 1.25 * sqrt(2) * train_length + (pow(ta, 2.0))/(sqrt(2) * train_length) - 2 * ta;
-        far[i]["invehicle"] = (b / 20) + (dist / 50);
-        far[i]["walktime"] = a / 4.5;
-        far[i]["time"] = far[i]["invehicle"] + far[i]["walktime"];
+        double dist = 1.25 * sqrt(2) * far_length + (pow(ta, 2.0))/(sqrt(2) * far_length) - 2 * ta;
+        est.far[i]["invehicle"] = (b / 20) + (dist / 50);
+        est.far[i]["walktime"] = a / 4.5;
+        est.far[i]["time"] = est.far[i]["invehicle"] + est.far[i]["walktime"];
 
         for(const auto& j : autobusFarebd){
-            far[i]["cost"] = j.second;
+            est.far[i]["cost"] = j.second;
             if(b < j.first) break;
         }
         int train_cost = 0;
@@ -1409,29 +1457,27 @@ int main()
             train_cost = j.second;
             if(dist < j.first) break;
         }
-        far[i]["cost"] += train_cost;
+        est.far[i]["cost"] += train_cost;
 
-        far[i]["transfer"] = 3;
-        far[i]["trainAvailable"] = 1;
+        est.far[i]["transfer"] = 3;
+        est.far[i]["trainAvailable"] = 1;
         //便宜的にtrainだとegressが長くなることを反映
-        far[i]["egress"] = 0.25;
-        far[i]["age"] = 0.5;
-        far[i]["licenseCar"] = 0.33;
-        far[i]["licenseBike"] = 0.15;
-        far[i]["autobus"] = 1;
+        est.far[i]["egress"] = 0.25;
+        est.far[i]["age"] = 0.5;
+        est.far[i]["licenseCar"] = 0.33;
+        est.far[i]["licenseBike"] = 0.15;
+        est.far[i]["autobus"] = 1;
         double opt = 8;
-        opt -= (1 - far[i]["licenseCar"]);
-        opt -= (1 - far[i]["licenseBike"]);
-        opt -= ( 1- far[i]["trainAvailable"]);
-        far[i]["options"] = opt;
+        opt -= (1 - est.far[i]["licenseCar"]);
+        opt -= (1 - est.far[i]["licenseBike"]);
+        opt -= ( 1- est.far[i]["trainAvailable"]);
+        est.far[i]["options"] = opt;
 
-        far[i]["trip"] = far_trip[i];
+        est.far[i]["trip"] = far_trip[i];
     }
 
-    //5.4.trip数を乗じる
+    //5.(n+1).trip数を乗じる
     //ccoefficientsのsclms - 1がパラメータβかつγ 自動運転バスの項は抜いている
     
-
-    //変数が重複するので構造体の検討を
     return 0;
 }
