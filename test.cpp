@@ -804,7 +804,6 @@ int main()
     LoadFile("alternateX.csv", "double", data.alternateX);
     LoadFile("alternateY.csv", "double", data.alternateY);
     LoadFile("alternateMeans.csv", "int", data.alternateMeans);
-
     /*
     for (const auto& row : data.alternateX) {
         for (const auto& val : row) {
@@ -822,16 +821,17 @@ int main()
     storeVariables(n,"stated",sfeat,data.statedX,data.statedY,data.statedMeans);
     //SP 選好結果
     vector<vector<int>> statedpreferences; //一次元配列でもよい
+
     LoadFile("statedIntentions.csv", "int", statedpreferences);
+
     for(int i = 0; i < n; i++){
-        sfeat[i]["sd"] = (double)statedpreferences[i][0];    
+        sfeat[i]["sd"] = (double)statedpreferences[i][0]; 
     }
     vector<vector<int>> revealedpreferences; //一次元配列でもよい
     LoadFile("revealedIntentions.csv", "int", revealedpreferences);
     for(int i = 0; i < n; i++){
         afeat[i]["rd"] = (double)revealedpreferences[i][0];    
     }
-  
 
     for(int i = 0; i < afeat.size(); i++){
         cout << "個人:" << i << endl;
@@ -841,17 +841,16 @@ int main()
         cout << endl;
     }
 
-
     //4.モデルの推計
 
     //4.1.SPデータからμ付きパラメータ推定
     //推計に用いる変数
     //テストデータでbikeはサンプル数が少ない つまりbikeをパラメータとして導入すると収束しない
     //順番は(RPSP共通特性) -> (SP特有特性)　-> (自動運転定数項autobus)
-    vector<string> sfactors = {"car","invehicle","cost","access","autobus"};
+    vector<string> sfactors = {"car","transfer","time","cost","invehicle","access","walktime","autobus"};
     int sclms = sfactors.size();
     //RSSP共通特性
-    int rscommon  = 4;
+    int rscommon  = 7;
     double teststat1 = 1.0E-4;
     double teststat2 = 1.0E-2;
 
@@ -908,7 +907,10 @@ int main()
         cout << "cert1:" << cert1 << endl;
         double cert2 = 0;
         for(int i = 0; i < sclms; i++){
-            if(scoefficients(i,0) == 0) continue;//実質的に無限大と見ているのと等しい
+            if(scoefficients(i,0) == 0){
+                cert2 ++;
+                continue;
+            }//実質的に無限大と見ているのと等しい
             cert2 += (renewedcos(i,0) - scoefficients(i,0)) / scoefficients(i,0);
         }
         if(sqrt(cert1) / sclms < teststat1 && cert2 < teststat2) break;
@@ -977,7 +979,7 @@ int main()
     //4.2.RPどうし比較
     //autobus定数項抜く
     //始めは必ずspで、2個目以降はRPデータにユニークな変数
-    vector<string> rfactors = {"sp","walktime","egress"};
+    vector<string> rfactors = {"sp"};
     int rclms = rfactors.size();
 
     Eigen::MatrixXd rcoefficients;
@@ -1034,7 +1036,7 @@ int main()
                 rhessian(i,j) = - fac;
             }
         }
-
+        //rhessian += 1e-6 * MatrixXd::Identity(rclms, rclms);
         MatrixXd renewedcos;
         renewedcos = rcoefficients - rhessian.ldlt().solve(rgradient);
         double cert1 = 0;
@@ -1044,15 +1046,18 @@ int main()
 
         double cert2 = 0;
         for(int i = 0; i < rclms; i++){
-            if(rcoefficients(i,0) == 0) continue;//実質的に無限大と見ているのと等しい
+            if(rcoefficients(i,0) == 0){
+                cert2 ++;
+                continue;
+            }//実質的に無限大と見ているのと等しい
             cert2 += (renewedcos(i,0) - rcoefficients(i,0)) / rcoefficients(i,0);
         }
         if(sqrt(cert1) / rclms < teststat1 && cert2 < teststat2) break;
 
         rcoefficients = renewedcos;
-        cout << "rco:" << rcoefficients << endl;
+        cout << "cert1:" << cert1 << endl;
         rcnt ++;
-        if(rcnt > 100) break;// 無限ループ防止
+        if(rcnt > 10) break;// 無限ループ防止
     }
 
     cout << rcnt <<  rcoefficients << endl;
@@ -1111,18 +1116,23 @@ int main()
     cout << "ρ^2:" << rrho << endl;
     cout << "ρ^2(bar):" << (n-rclms) * rrho / n<< endl;
 
-    //rcoefficients(0,0) = λ 逆数はμ これが0から1の間に収まらない問題
+    //rcoefficients(0,0) = λ 逆数はμ
     double mu = 1 / rcoefficients(0,0);
     cout << "mu:" << mu << endl;
     //便宜的
-    mu = 1;
     Eigen::MatrixXd newscoeff;
     newscoeff = MatrixXd::Zero(sclms, 1);
     //β(bar), γ(bar)
     for(int i = 0; i < sclms - 1; i++){
         newscoeff(i,0) = scoefficients(i,0) / mu;
     }
+    //autobus
+    newscoeff(sclms - 1,0) = scoefficients(sclms - 1,0);
 
+    //alpha
+    for(int i = 1; i < rclms; i++){
+        newscoeff(i - 1 + sclms,0) = rcoefficients(i,0);
+    }
     //step3
     //ここではcfeat1をQ(s)-subwayとP(a)-alternate
     //cfeat2をQ(r)-regularとP(r)-regularとしてプールする
@@ -1130,10 +1140,11 @@ int main()
     vector<map<string, double>> cfeat2(2*n);
     for(int i = 0; i < n; i++){
         for(const auto& key: sfeat[i]){
-            cfeat1[i][key.first] = mu * sfeat[i][key.first];
+            cfeat2[i][key.first] = mu * sfeat[i][key.first];
+            if(key.first == "autobus")  cfeat2[i][key.first] = sfeat[i][key.first];
         }
-        cfeat1[i]["d"] = sfeat[i]["sd"];
-        cfeat1[i]["options"] = sfeat[i]["options"];
+        //cfeat2[i]["d"] = sfeat[i]["sd"];
+        cfeat2[i]["options"] = sfeat[i]["options"];
     }
     for(int i = 0; i < n; i++){
         for(const auto& key: afeat[i]){
@@ -1144,9 +1155,10 @@ int main()
     }
     for(int i = 0; i < n; i++){
         for(const auto& key: rfeat[i]){
-            cfeat2[i][key.first] = rfeat[i][key.first];
+            cfeat1[i][key.first] = mu * rfeat[i][key.first];
         }
-        cfeat2[i]["options"] = rfeat[i]["options"];
+        cfeat1[i]["d"] = 1 - sfeat[i]["sd"];
+        cfeat1[i]["options"] = rfeat[i]["options"];
     }
     for(int i = 0; i < n; i++){
         for(const auto& key: rfeat[i]){
@@ -1155,6 +1167,13 @@ int main()
         cfeat2[i + n]["options"] = rfeat[i]["options"];
     }
 
+    /*for(int i = 0; i < cfeat1.size(); i++){
+        cout << "個人:" << i << endl;
+        for(const auto& key: cfeat1[i]){
+            cout << key.first << " : " << key.second << " "; 
+        }
+        cout << endl;
+    }*/
     //4.3.再計算
     //順番は統一を保つためβ,γ,autobus,α
     vector<string> cfactors;
@@ -1166,12 +1185,10 @@ int main()
         cfactors.emplace_back(rfactors[i]);
     }
     int cclms = cfactors.size();
-    for(int i = 0; i < cclms; i++){
-        cout << cfactors[i] << endl;
-    }
 
     Eigen::MatrixXd ccoefficients;
     ccoefficients = MatrixXd::Zero(cclms, 1);//最初のパラメータ初期値は0
+    ccoefficients = newscoeff;
 
     Eigen::MatrixXd cgradient;
     cgradient = MatrixXd::Zero(cclms, 1);
@@ -1181,7 +1198,7 @@ int main()
     int ccnt = 0;
 
     while(true){
-        //勾配ベクトルの要素 (i,1)
+        //勾配ベクトルの要素 (i,0)
         for(int i = 0; i < cclms; i++){
             double fac = 0;
             //個人 j
@@ -1191,8 +1208,6 @@ int main()
                 for(int k = 0; k < cclms; k++){
                     diffs += ccoefficients(k,0) * (cfeat1[j][cfactors[k]] - cfeat2[j][cfactors[k]]);
                 }
-                //cout << "i:" << i << "j:" << j << endl;
-
                 double pa = 1 / (1 + exp( - (diffs + log(cfeat2[j]["options"]))));
                 fac += (cfeat1[i]["d"] - pa) * (cfeat1[j][cfactors[i]] - cfeat2[j][cfactors[i]]);
             }
@@ -1215,27 +1230,35 @@ int main()
                 chessian(i,j) = - fac;
             }
         }
+        //cout <<"coefficient:\n" << ccoefficients << endl;
         //cout <<"gradient:\n" << cgradient << endl;
         //cout <<"hessian\n" << chessian << endl;
 
         MatrixXd renewedcos;
-        renewedcos = ccoefficients - chessian.ldlt().solve(cgradient);
+        //renewedcos = ccoefficients - 0.01*cgradient;
+        renewedcos = ccoefficients - 0.00001 * chessian.ldlt().solve(cgradient);
         double cert1 = 0;
         for(int i = 0; i < cclms; i++){
             cert1 += pow(renewedcos(i,0) - ccoefficients(i,0), 2.0);
         }
-        cout << "c1:" <<  cert1 << endl;
+        if(ccnt % 100 == 0){
+            cout <<ccnt << "回目" << endl;
+            cout << "c1:" <<  cert1 << endl;
+        }
 
         double cert2 = 0;
         for(int i = 0; i < cclms; i++){
-            if(ccoefficients(i,0) == 0) continue;//実質的に無限大と見ているのと等しい
+            if(ccoefficients(i,0) == 0){
+                cert2 ++;
+                continue;
+            }//実質的に無限大と見ているのと等しい
             cert2 += (renewedcos(i,0) - ccoefficients(i,0)) / ccoefficients(i,0);
         }
         if(sqrt(cert1) / cclms < teststat1 && cert2 < teststat2) break;
 
         ccoefficients = renewedcos;
         ccnt ++;
-        if(ccnt > 50) break;// 無限ループ防止
+        if(ccnt > 100) break;// 無限ループ防止
     }
 
     cout << ccnt <<  ccoefficients << endl;
@@ -1294,14 +1317,14 @@ int main()
     cout << "ρ^2:" << rrho << endl;
     cout << "ρ^2(bar):" << (2 * n - cclms) * rrho / 2 * n<< endl;
 
-
+    
     //5.将来値の予測
     //x軸は縦方向とする
     double xmax = 2;
     double ymax = 3;
     //メッシュの一辺長
     double unit = 0.25;
-    int zones = (xmax - unit) * (ymax - unit);
+    int zones = (xmax / unit) * (ymax / unit);
 
     vector<pair<double, double>> bus_route;
     vector<int> bus_hasspot;
@@ -1354,6 +1377,7 @@ int main()
         est.close[i]["age"] = 0.5;
 
         est.close[i]["trip"] = close_trip[i];
+        cout <<"ct:" << total_trip << endl;
         total_trip += close_trip[i];
     }
 
@@ -1500,11 +1524,11 @@ int main()
 
     //5.5.4.close car
     //park + fuelpk * 距離
-    est.car["cost"] = 300 + 7.12 * min(xmax, ymax);
+    est.car["cost"] = 500 + 6.23 * min(xmax, ymax);
     est.car["access"] = 0;
     est.car["invehicle"] = 0;
     est.car["walktime"] = 0;
-    est.car["time"] = 1.1 * min(xmax, ymax) / 35;
+    est.car["time"] = 1.2 * min(xmax, ymax) / 45;
     est.car["transfer"] = 0;
     est.car["egress"] = 0;
     est.car["age"] = 0.5;
@@ -1539,7 +1563,10 @@ int main()
     ccar_total *= est.car_ratio;
 
     double close_total = ctaxi_total + cbicycle_total + cmotor_total + ccar_total;
+    cout << "ctaxi_total" << ctaxi_total << endl;
+    cout << "close_total" << close_total << endl;
     double close_prob = close_total / total_trip;
+    cout << "close_prob" << close_prob << endl;
 
     //5.6.長距離輸送
     //同じことを長距離輸送についても行う 鉄道でなくても長距離輸送であれば代用可
@@ -1558,7 +1585,7 @@ int main()
     
     //鉄道を使う場合の平均移動距離
     double far_length = 20;
-
+    double far_total_trip = 0;
     est.far.resize(zones);
     map<double, double> trainFarebd;
     LoadFileAsFare("trainFarebd.csv", trainFarebd);
@@ -1618,6 +1645,7 @@ int main()
         est.far[i]["age"] = 0.5;
 
         est.far[i]["trip"] = far_trip[i];
+        far_total_trip += far_trip[i];
     }
 
     //5.6.1.far✕
@@ -1657,7 +1685,99 @@ int main()
     //ftaxi_totalは「自動運転バス＋鉄道」と「タクシー(他バイク、車)」のうち前者を選ぶ総数
     ftaxi_total *= 1 - (est.bicycle_ratio + est.car_ratio + est.motor_ratio);
     //鉄道駅へのアクセス手段も（continueで弾いた徒歩のぞき）自動運転かタクシーが考えられる それは先程求めたcloseの選択確率を用いる
-    ftaxi_total *=  ctaxi_total / total_trip * (1 - (est.bicycle_ratio + est.car_ratio + est.motor_ratio));
+    ftaxi_total *=  (ctaxi_total / total_trip) * (1 - (est.bicycle_ratio + est.car_ratio + est.motor_ratio));
+
+    //5.6.2.far bicycle
+    //taxiの特性の再計算 close -> far
+    est.bicycle["cost"] = 200 + 0 * far_length;
+    est.bicycle["time"] = 1.2 * far_length / 40;
+    est.bicycle["options"] = 5;
+
+    for(int i = 0; i < zones; i++){
+        if(train_area[i]) continue;
+        est.far[i].erase("car");
+        est.far[i]["bicycleAvailable"] = 1;
+        est.far[i]["bike"] = 0;
+        est.far[i]["options"] = 5;
+    }
+
+    //trip数を乗じる
+    double fbicycle_total = 0;
+
+    for(int i = 0; i < zones; i++){
+        if(train_area[i]) continue;
+        double diffs = 0;
+        for(int j = 0; j < sclms - 1; j++){
+            diffs += ccoefficients(j,0) * (est.far[i][cfactors[j]] - est.bicycle[cfactors[j]]);
+        }
+        double prob = 1 / (1 + exp(mu*(diffs - log(est.far[i]["options"]))));
+        fbicycle_total += est.far[i]["trip"] * prob;
+    }
+
+    fbicycle_total *= est.bicycle_ratio;
+    fbicycle_total *= cbicycle_total / total_trip;
+
+    //5.6.3.far motor
+    est.motor["cost"] = 300 + 7.12 * far_length;
+    est.motor["time"] = 1.1 * far_length / 35;
+    est.motor["options"] = 6;
+
+    for(int i = 0; i < zones; i++){
+        if(train_area[i]) continue;
+        est.far[i]["licenseBike"] = 1;
+        est.far[i]["options"] = 6;
+    }
+
+    //trip数を乗じる
+    double fmotor_total = 0;
+
+    for(int i = 0; i < zones; i++){
+        if(train_area[i]) continue;
+        double diffs = 0;
+        for(int j = 0; j < sclms - 1; j++){
+            diffs += ccoefficients(j,0) * (est.far[i][cfactors[j]] - est.motor[cfactors[j]]);
+        }
+        double prob = 1 / (1 + exp(mu*(diffs - log(est.far[i]["options"]))));
+        fmotor_total += est.far[i]["trip"] * prob;
+    }
+
+    fmotor_total *= est.motor_ratio;
+    fmotor_total *= cmotor_total / total_trip;
+
+    //5.6.4.far car
+    est.car["cost"] = 500 + 6.23 * far_length;
+    est.car["time"] = 1.2 * far_length / 45;
+    est.car["options"] = 6;
+
+    for(int i = 0; i < zones; i++){
+        if(train_area[i]) continue;
+        est.far[i].erase("bike");
+        est.far[i]["licenseCar"] = 1;
+        est.far[i]["car"] = 0;
+        est.far[i]["options"] = 6;
+    }
+
+    //trip数を乗じる
+    double fcar_total = 0;
+
+    for(int i = 0; i < zones; i++){
+        if(train_area[i]) continue;
+        double diffs = 0;
+        for(int j = 0; j < sclms - 1; j++){
+            diffs += ccoefficients(j,0) * (est.far[i][cfactors[j]] - est.car[cfactors[j]]);
+        }
+        double prob = 1 / (1 + exp(mu*(diffs - log(est.far[i]["options"]))));
+        fcar_total += est.far[i]["trip"] * prob;
+    }
+
+    fcar_total *= est.car_ratio;
+    fcar_total *= ccar_total / total_trip;
+
+    //そういえばbicycleはいらなかったのでは…
+    double far_total = ftaxi_total + fbicycle_total + fmotor_total + fcar_total;
+    double far_prob = far_total / far_total_trip;
+
+    cout << "自動運転バスを利用する人数は" << total_trip - close_total + far_total_trip - far_total << endl;
 
     return 0;
 }
