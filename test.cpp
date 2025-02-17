@@ -752,7 +752,7 @@ void storeVariables(int n, string dataType, vector<map<string, double>> &feat, v
         if(feat[i]["licenseCar"] == 0) opt --;
         if(feat[i]["licenseBike"] == 0) opt --;
         if(feat[i]["trainAvailable"] == 0) opt --;
-        if(feat[i]["bicyclevailable"] == 0) opt --;
+        if(feat[i]["bicycleAvailable"] == 0) opt --;
         if(dataType == "revealed") opt --;
 
         feat[i]["options"] = opt;
@@ -847,7 +847,7 @@ int main()
     //推計に用いる変数
     //テストデータでbikeはサンプル数が少ない つまりbikeをパラメータとして導入すると収束しない
     //順番は(RPSP共通特性) -> (SP特有特性)　-> (自動運転定数項autobus)
-    vector<string> sfactors = {"car","transfer","time","cost","invehicle","access","walktime","autobus"};
+    vector<string> sfactors = {"bike","transfer","time","invehicle","access","walktime","autobus"};
     int sclms = sfactors.size();
     //RSSP共通特性
     int rscommon  = 7;
@@ -903,8 +903,6 @@ int main()
         for(int i = 0; i < sclms; i++){
             cert1 += pow(renewedcos(i,0) - scoefficients(i,0), 2.0);
         }
-        cout << "scnt:" << scnt << endl;
-        cout << "cert1:" << cert1 << endl;
         double cert2 = 0;
         for(int i = 0; i < sclms; i++){
             if(scoefficients(i,0) == 0){
@@ -913,6 +911,11 @@ int main()
             }//実質的に無限大と見ているのと等しい
             cert2 += (renewedcos(i,0) - scoefficients(i,0)) / scoefficients(i,0);
         }
+
+        cout << "scnt:" << scnt << endl;
+        cout << "cert1:" << cert1 << endl;
+        cout << "cert2:" << cert2 << endl;
+
         if(sqrt(cert1) / sclms < teststat1 && cert2 < teststat2) break;
 
         scoefficients = renewedcos;
@@ -933,9 +936,15 @@ int main()
         cout << "t" << i << ":" << t << endl;
     }
 
+    double sl0 = 0;
+    for(int i = 0; i < n; i++){
+        //選択肢数の関係で-Nln2にはならない
+        sl0 += sfeat[i]["sd"] * log(1/(1+exp(sfeat[i]["options"]))) + (1 - sfeat[i]["sd"]) *  log(1/(1 + (1 / log(sfeat[i]["options"]))));
+    }
+
     double slc = 0;
     for(int i = 0; i < n; i++){
-        slc += sfeat[i]["sd"] * log(1/(1+exp(-scoefficients(1,0) + log(sfeat[i]["options"])))) + (1 - sfeat[i]["sd"]) *  log(1/(1+exp(scoefficients(1,0) - log(sfeat[i]["options"]))));
+        slc += sfeat[i]["sd"] * log(1/(1+exp(-scoefficients(0,0) + log(sfeat[i]["options"])))) + (1 - sfeat[i]["sd"]) *  log(1/(1+exp(scoefficients(0,0) - log(sfeat[i]["options"]))));
     }
 
     double smaxl = 0;
@@ -947,7 +956,7 @@ int main()
         smaxl += sfeat[i]["sd"] * log(1/(1+exp(-diffs + log(sfeat[i]["options"])))) + (1 - sfeat[i]["sd"]) * log(1/(1+exp(diffs - log(sfeat[i]["options"]))));
     }
 
-    double schi0 = -2 * ( - n * log(2) - smaxl);
+    double schi0 = -2 * (sl0 - smaxl);
     double schic = -2 * (slc - smaxl);
 
     double scnt1 = 0;
@@ -962,10 +971,10 @@ int main()
         double qr = 1/(1+exp(diffs - log(sfeat[i]["options"])));
         if(qr >= 0.5 && sfeat[i]["sd"] == 0 || qr < 0.5 && sfeat[i]["sd"] == 1) scnt2 ++;
     }
-    double srho = 1 - smaxl / (- n * log(2));
+    double srho = 1 - smaxl / sl0;
 
     cout << "N:" << n << endl;
-    cout << "L(0):" << - n * log(2) << endl;
+    cout << "L(0):" << sl0 << endl;
     cout << "L(c):" << slc << endl;
     cout << "L(θ):" << smaxl << endl;
     cout << "χ^2_0:" << schi0 << endl;
@@ -1036,7 +1045,6 @@ int main()
                 rhessian(i,j) = - fac;
             }
         }
-        //rhessian += 1e-6 * MatrixXd::Identity(rclms, rclms);
         MatrixXd renewedcos;
         renewedcos = rcoefficients - rhessian.ldlt().solve(rgradient);
         double cert1 = 0;
@@ -1073,9 +1081,15 @@ int main()
         cout << "t" << i << ":" << t << endl;
     }
 
+    double rl0 = 0;
+    for(int i = 0; i < n; i++){
+        rl0 += afeat[i]["rd"] * log(1/(1 + (1 / rfeat[i]["options"]))) + (1 - afeat[i]["rd"]) * log(1/(1+rfeat[i]["options"]));
+    }
+
     double rlc = 0;
     for(int i = 0; i < n; i++){
-        rlc += afeat[i]["rd"] * log(1/(1+exp(rcoefficients(0,0) - log(rfeat[i]["options"]))));
+        //ダミー変数を導入しない場合この項は無くてよい(？) 結局rl0と同じ
+        rlc += afeat[i]["rd"] * log(1/(1+exp(- log(rfeat[i]["options"])))) + (1 - afeat[i]["rd"]) * log(1/(1+exp( log(rfeat[i]["options"]))));
     }
 
     double rmaxl = 0;
@@ -1084,10 +1098,10 @@ int main()
         for(int j = 0; j < rclms; j ++){
             diffs += rcoefficients(j,0) * (afeat[i][rfactors[j]] - rfeat[i][rfactors[j]]);
         }
-        rmaxl += log(1/(1+exp(diffs - log(rfeat[i]["options"]))));
+        rmaxl += afeat[i]["rd"] * log(1/(1+exp(- diffs - log(rfeat[i]["options"])))) + (1 - afeat[i]["rd"]) * log(1/(1+exp(diffs + log(rfeat[i]["options"]))));
     }
 
-    double rchi0 = -2 * ( - n * log(2) - rmaxl);
+    double rchi0 = -2 * (rl0 - rmaxl);
     double rchic = -2 * (rlc - rmaxl);
 
     double rcnt1 = 0;
@@ -1102,10 +1116,10 @@ int main()
         double pr = 1/(1+exp(diffs + log(rfeat[i]["options"])));
         if(pr >= 0.5 && afeat[i]["rd"] == 0 || pr < 0.5 && afeat[i]["rd"] == 1) rcnt2 ++;
     }
-    double rrho = 1 - rmaxl / (- n * log(2));
+    double rrho = 1 - rmaxl / rl0;
 
     cout << "N:" << n << endl;
-    cout << "L(0):" << - n * log(2) << endl;
+    cout << "L(0):" << rl0 << endl;
     cout << "L(c):" << rlc << endl;
     cout << "L(θ):" << rmaxl << endl;
     cout << "χ^2_0:" << rchi0 << endl;
@@ -1121,7 +1135,7 @@ int main()
     cout << "mu:" << mu << endl;
     //便宜的
     Eigen::MatrixXd newscoeff;
-    newscoeff = MatrixXd::Zero(sclms, 1);
+    newscoeff = MatrixXd::Zero(sclms + rclms - 1, 1);
     //β(bar), γ(bar)
     for(int i = 0; i < sclms - 1; i++){
         newscoeff(i,0) = scoefficients(i,0) / mu;
@@ -1258,14 +1272,13 @@ int main()
 
         ccoefficients = renewedcos;
         ccnt ++;
-        if(ccnt > 100) break;// 無限ループ防止
+        if(ccnt > 500) break;// 無限ループ防止
     }
 
     cout << ccnt <<  ccoefficients << endl;
 
     Eigen::MatrixXd cvarcov;
     cvarcov = - chessian;
-    cout << chessian << endl;
     cvarcov = cvarcov.inverse();
     for(int i = 0; i < cclms; i++){
         double t = 0;
@@ -1274,9 +1287,14 @@ int main()
         cout << "t" << i << ":" << t << endl;
     }
 
+    double cl0 = 0;
+    for(int i = 0; i < 2 * n; i++){
+        cl0 += cfeat1[i]["d"] * log(1/(1 + (1/cfeat2[i]["options"]))) + (1 - cfeat1[i]["d"]) * log(1/(1 + cfeat2[i]["options"]));
+    }
+
     double clc = 0;
     for(int i = 0; i < 2 * n; i++){
-        clc += cfeat1[i]["d"] * log(1/(1+exp(ccoefficients(0,0) - log(cfeat2[i]["options"]))));
+        clc += cfeat1[i]["d"] * log(1/(1+exp(ccoefficients(0,0) - log(cfeat2[i]["options"])))) + (1 - cfeat1[i]["d"]) * log(1/(1+exp( - ccoefficients(0,0) + log(cfeat2[i]["options"]))));
     }
 
     double cmaxl = 0;
@@ -1285,10 +1303,10 @@ int main()
         for(int j = 0; j < cclms; j ++){
             diffs += ccoefficients(j,0) * (cfeat1[i][cfactors[j]] - cfeat2[i][cfactors[j]]);
         }
-        cmaxl += log(1/(1+exp(diffs - log(cfeat2[i]["options"]))));
+        cmaxl += cfeat1[i]["d"] * log(1/(1+exp( - diffs - log(cfeat2[i]["options"])))) + (1 - cfeat1[i]["d"]) * log(1/(1+exp(diffs + log(cfeat2[i]["options"]))));
     }
 
-    double cchi0 = -2 * ( - 2 * n * log(2) - cmaxl);
+    double cchi0 = -2 * (cl0 - cmaxl);
     double cchic = -2 * (clc - cmaxl);
 
     double ccnt1 = 0;
@@ -1303,10 +1321,10 @@ int main()
         double pr = 1/(1+exp(diffs + log(cfeat2[i]["options"])));
         if(pr >= 0.5 && cfeat1[i]["d"] == 0 || pr < 0.5 && cfeat1[i]["d"] == 1) ccnt2 ++;
     }
-    double crho = 1 - cmaxl / (- 2 * n * log(2));
+    double crho = 1 - cmaxl / cl0;
 
     cout << "N:" << 2 * n << endl;
-    cout << "L(0):" << -2 * n * log(2) << endl;
+    cout << "L(0):" << cl0 << endl;
     cout << "L(c):" << clc << endl;
     cout << "L(θ):" << cmaxl << endl;
     cout << "χ^2_0:" << cchi0 << endl;
@@ -1315,7 +1333,7 @@ int main()
     cout << "hitr2:" << ccnt2 / (2 * n) << endl;
     cout << "hitr:" << (ccnt1 + ccnt2) / (4 * n) << endl;
     cout << "ρ^2:" << rrho << endl;
-    cout << "ρ^2(bar):" << (2 * n - cclms) * rrho / 2 * n<< endl;
+    cout << "ρ^2(bar):" << (2 * n - cclms) * rrho / (2 * n)<< endl;
 
     
     //5.将来値の予測
@@ -1377,7 +1395,6 @@ int main()
         est.close[i]["age"] = 0.5;
 
         est.close[i]["trip"] = close_trip[i];
-        cout <<"ct:" << total_trip << endl;
         total_trip += close_trip[i];
     }
 
@@ -1685,24 +1702,13 @@ int main()
     //ftaxi_totalは「自動運転バス＋鉄道」と「タクシー(他バイク、車)」のうち前者を選ぶ総数
     ftaxi_total *= 1 - (est.bicycle_ratio + est.car_ratio + est.motor_ratio);
     //鉄道駅へのアクセス手段も（continueで弾いた徒歩のぞき）自動運転かタクシーが考えられる それは先程求めたcloseの選択確率を用いる
-    ftaxi_total *=  (ctaxi_total / total_trip) * (1 - (est.bicycle_ratio + est.car_ratio + est.motor_ratio));
+    ftaxi_total *= ctaxi_total / total_trip;
 
     //5.6.2.far bicycle
-    //taxiの特性の再計算 close -> far
-    est.bicycle["cost"] = 200 + 0 * far_length;
-    est.bicycle["time"] = 1.2 * far_length / 40;
-    est.bicycle["options"] = 5;
-
-    for(int i = 0; i < zones; i++){
-        if(train_area[i]) continue;
-        est.far[i].erase("car");
-        est.far[i]["bicycleAvailable"] = 1;
-        est.far[i]["bike"] = 0;
-        est.far[i]["options"] = 5;
-    }
-
-    //trip数を乗じる
-    double fbicycle_total = 0;
+    //しかしfar bicycleの組み合わせは存在しないので結局選択確率はタクシーと同じ
+    double fbicycle_total = ftaxi_total;
+    fbicycle_total *= est.bicycle_ratio / (1 - (est.bicycle_ratio + est.car_ratio + est.motor_ratio));
+    fbicycle_total *= cbicycle_total / ctaxi_total;
 
     for(int i = 0; i < zones; i++){
         if(train_area[i]) continue;
