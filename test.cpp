@@ -847,10 +847,10 @@ int main()
     //推計に用いる変数
     //テストデータでbikeはサンプル数が少ない つまりbikeをパラメータとして導入すると収束しない
     //順番は(RPSP共通特性) -> (SP特有特性)　-> (自動運転定数項autobus)
-    vector<string> sfactors = {"bike","transfer","time","invehicle","access","walktime","autobus"};
+    vector<string> sfactors = {"car","walktime","time","invehicle","access","autobus"};
     int sclms = sfactors.size();
     //RSSP共通特性
-    int rscommon  = 7;
+    int rscommon  = 5;
     double teststat1 = 1.0E-4;
     double teststat2 = 1.0E-2;
 
@@ -1272,7 +1272,7 @@ int main()
 
         ccoefficients = renewedcos;
         ccnt ++;
-        if(ccnt > 500) break;// 無限ループ防止
+        if(ccnt > 2000) break;// 無限ループ防止
     }
 
     cout << ccnt <<  ccoefficients << endl;
@@ -1697,12 +1697,13 @@ int main()
         }
         double prob = 1 / (1 + exp(mu*(diffs - log(est.close[i]["options"]))));
         ftaxi_total += est.far[i]["trip"] * prob;
+        //鉄道駅へのアクセス手段も（continueで弾いた徒歩のぞき）自動運転かタクシーが考えられる それは先程求めたcloseの選択確率を用いる
+        //ftaxi_totalに含めるのが適切かどうかは分からないが…
+        ftaxi_total += est.far[i]["trip"] * (1  - prob) * ctaxi_total / total_trip;
     }
 
     //ftaxi_totalは「自動運転バス＋鉄道」と「タクシー(他バイク、車)」のうち前者を選ぶ総数
     ftaxi_total *= 1 - (est.bicycle_ratio + est.car_ratio + est.motor_ratio);
-    //鉄道駅へのアクセス手段も（continueで弾いた徒歩のぞき）自動運転かタクシーが考えられる それは先程求めたcloseの選択確率を用いる
-    ftaxi_total *= ctaxi_total / total_trip;
 
     //5.6.2.far bicycle
     //しかしfar bicycleの組み合わせは存在しないので結局選択確率はタクシーと同じ
@@ -1718,10 +1719,10 @@ int main()
         }
         double prob = 1 / (1 + exp(mu*(diffs - log(est.far[i]["options"]))));
         fbicycle_total += est.far[i]["trip"] * prob;
+        fbicycle_total += est.far[i]["trip"] * (1 - prob) * cbicycle_total / total_trip;
     }
 
     fbicycle_total *= est.bicycle_ratio;
-    fbicycle_total *= cbicycle_total / total_trip;
 
     //5.6.3.far motor
     est.motor["cost"] = 300 + 7.12 * far_length;
@@ -1745,10 +1746,10 @@ int main()
         }
         double prob = 1 / (1 + exp(mu*(diffs - log(est.far[i]["options"]))));
         fmotor_total += est.far[i]["trip"] * prob;
+        fmotor_total += est.far[i]["trip"] * (1 - prob) * cmotor_total / total_trip;
     }
 
     fmotor_total *= est.motor_ratio;
-    fmotor_total *= cmotor_total / total_trip;
 
     //5.6.4.far car
     est.car["cost"] = 500 + 6.23 * far_length;
@@ -1774,16 +1775,16 @@ int main()
         }
         double prob = 1 / (1 + exp(mu*(diffs - log(est.far[i]["options"]))));
         fcar_total += est.far[i]["trip"] * prob;
+        fcar_total += est.far[i]["trip"] * (1 - prob) * ccar_total / total_trip;
     }
 
     fcar_total *= est.car_ratio;
-    fcar_total *= ccar_total / total_trip;
 
-    //そういえばbicycleはいらなかったのでは…
     double far_total = ftaxi_total + fbicycle_total + fmotor_total + fcar_total;
     double far_prob = far_total / far_total_trip;
 
     cout << "自動運転バスを利用する人数は" << total_trip - close_total + far_total_trip - far_total << endl;
+    cout << "全体に占める割合は" << 1 - (close_total + far_total)/(total_trip + far_total_trip) << endl;
 
     return 0;
 }
