@@ -693,7 +693,15 @@ void storeVariables(int n, string dataType, vector<map<string, double>> &feat, v
             feat[i]["egress"] = 0;
         }
         //3.3.6.乗換え回数
-        feat[i]["transfer"] = means[i].size() - 1;
+        feat[i]["transfer"] = 0;
+        for(int j = 0; j < means[i].size(); j++){
+            //徒歩は含めない
+            if(means[i][j] == 1 || means[i][j] == 2 || means[i][j] == 8){
+                feat[i]["transfer"] ++;
+            }
+        }
+        if(feat[i]["transfer"]) feat[i]["transfer"] --;
+
 
         //3.3.7.ダミー変数 「主要交通手段」
         /*if(count(begin(means[i]), end(means[i]), 1)){
@@ -853,7 +861,7 @@ int main()
     vector<vector<int>> revealedpreferences; //一次元配列でもよい
     LoadFile("revealedIntentions.csv", "int", revealedpreferences);
     for(int i = 0; i < n; i++){
-        afeat[i]["rd"] = (double)revealedpreferences[i][0];    
+        rfeat[i]["rd"] = (double)revealedpreferences[i][0];    
     }
 
     //4.モデルの推計
@@ -865,11 +873,10 @@ int main()
     //テストデータでbikeはサンプル数が少ない つまりbikeをパラメータとして導入すると収束しない
     //順番は(RPSP共通特性) -> (SP特有特性)　-> (自動運転定数項autobus)
     //licenseCarなどの個人特性を導入する場合、どちらかを0にしなければ意味が無い
-    vector<string> sfactors = {"train","car","bike","access","receptivity","autobus"};
-    int ccntmax = 200;
+    vector<string> sfactors = {"train","invehicle","time","fare","cost","receptivity","autobus"};
     int sclms = sfactors.size();
     //RSSP共通特性
-    int rscommon  = 4;
+    int rscommon  = 5;
     double teststat1 = 1.0E-4;
     double teststat2 = 1.0E-2;
 
@@ -881,13 +888,13 @@ int main()
         }
     }
 
-    for(int i = 0; i < rfeat.size(); i++){
+    /*for(int i = 0; i < rfeat.size(); i++){
         cout << "個人:" << i << endl;
         for(const auto& key: rfeat[i]){
             cout << key.first << " : " << key.second << " "; 
         }
         cout << endl;
-    }
+    }*/
 
     Eigen::MatrixXd scoefficients;
     scoefficients = MatrixXd::Zero(sclms, 1);//最初のパラメータ初期値は0
@@ -974,7 +981,7 @@ int main()
     double sl0 = 0;
     for(int i = 0; i < n; i++){
         //選択肢数の関係で-Nln2にはならない
-        sl0 += sfeat[i]["sd"] * log(1/(1+exp(sfeat[i]["options"]))) + (1 - sfeat[i]["sd"]) *  log(1/(1 + (1 / log(sfeat[i]["options"]))));
+        sl0 += sfeat[i]["sd"] * log(1/(1+sfeat[i]["options"])) + (1 - sfeat[i]["sd"]) *  log(1/(1 + (1/sfeat[i]["options"])));
     }
 
     double slc = 0;
@@ -1023,7 +1030,7 @@ int main()
     //4.2.RPどうし比較
     //autobus定数項抜く
     //始めは必ずspで、2個目以降はRPデータにユニークな変数
-    vector<string> rfactors = {"sp"};
+    vector<string> rfactors = {"sp","access"};
     int rclms = rfactors.size();
 
     //選択肢固有変数の更新
@@ -1065,10 +1072,10 @@ int main()
                 double diffs = 0; //θ'(X_sn - X_rn)の計算
                 //属性 k (インデックス rfactors[k]と対応)
                 for(int k = 0; k < rclms; k++){
-                    diffs += rcoefficients(k,0) * (afeat[j][rfactors[k]] - rfeat[j][rfactors[k]]);
+                    diffs += rcoefficients(k,0) * (rfeat[j][rfactors[k]] - afeat[j][rfactors[k]]);
                 }
-                double pa = 1 / (1 + exp( - (diffs + log(rfeat[j]["options"]))));
-                fac += (afeat[i]["rd"] - pa) * (afeat[j][rfactors[i]] - rfeat[j][rfactors[i]]);
+                double pr = 1 / (1 + exp( - (diffs)));
+                fac += (rfeat[i]["rd"] - pr) * (rfeat[j][rfactors[i]] - afeat[j][rfactors[i]]);
             }
             rgradient(i,0) = fac;
         }   
@@ -1080,11 +1087,11 @@ int main()
                 for(int k = 0; k < n; k++){
                     double diffs = 0; //θ'(X_sn - X_rn)の計算
                     for(int l = 0; l < rclms; l++){
-                        diffs += rcoefficients(l,0) * (afeat[k][rfactors[l]] - rfeat[k][rfactors[l]]);
+                        diffs += rcoefficients(l,0) * (rfeat[k][rfactors[l]] - afeat[k][rfactors[l]]);
                     }
-                    double pa = 1 / (1 + exp( - ( diffs + log(rfeat[k]["options"]))));
-                    double pr = 1 - pa;
-                    fac += pr * pa * (afeat[k][rfactors[i]] - rfeat[k][rfactors[i]]) * (afeat[k][rfactors[j]] - rfeat[k][rfactors[j]]);
+                    double pr = 1 / (1 + exp( - ( diffs)));
+                    double pa = 1 - pr;
+                    fac += pr * pa * (rfeat[k][rfactors[i]] - afeat[k][rfactors[i]]) * (rfeat[k][rfactors[j]] - afeat[k][rfactors[j]]);
                 }
                 rhessian(i,j) = - fac;
             }
@@ -1109,7 +1116,7 @@ int main()
         rcoefficients = renewedcos;
         cout << "cert1:" << cert1 << endl;
         rcnt ++;
-        if(rcnt > 10) break;// 無限ループ防止
+        if(rcnt > 100) break;// 無限ループ防止
     }
 
     cout << rcnt <<  rcoefficients << endl;
@@ -1126,23 +1133,24 @@ int main()
     }
 
     double rl0 = 0;
-    for(int i = 0; i < n; i++){
-        rl0 += afeat[i]["rd"] * log(1/(1 + (1 / rfeat[i]["options"]))) + (1 - afeat[i]["rd"]) * log(1/(1+rfeat[i]["options"]));
-    }
+    rl0 = - n * log(2);
+    /*for(int i = 0; i < n; i++){
+        rl0 += rfeat[i]["rd"] * log(1/(1+1)) + (1 - rfeat[i]["rd"]) * log(1/(1 + 1));
+    }*/
 
     double rlc = 0;
     for(int i = 0; i < n; i++){
         //ダミー変数を導入しない場合この項は無くてよい(？) 結局rl0と同じ
-        rlc += afeat[i]["rd"] * log(1/(1+exp(- log(rfeat[i]["options"])))) + (1 - afeat[i]["rd"]) * log(1/(1+exp( log(rfeat[i]["options"]))));
+        rlc += rfeat[i]["rd"] * log(1/(1+exp(0))) + (1 - rfeat[i]["rd"]) * log(1/(1+exp(0)));
     }
 
     double rmaxl = 0;
     for(int i = 0; i < n; i++){
         double diffs = 0;
         for(int j = 0; j < rclms; j ++){
-            diffs += rcoefficients(j,0) * (afeat[i][rfactors[j]] - rfeat[i][rfactors[j]]);
+            diffs += rcoefficients(j,0) * (rfeat[i][rfactors[j]] - afeat[i][rfactors[j]]);
         }
-        rmaxl += afeat[i]["rd"] * log(1/(1+exp(- diffs - log(rfeat[i]["options"])))) + (1 - afeat[i]["rd"]) * log(1/(1+exp(diffs + log(rfeat[i]["options"]))));
+        rmaxl += rfeat[i]["rd"] * log(1/(1+exp( - diffs))) + (1 - rfeat[i]["rd"]) * log(1/(1+exp(diffs)));
     }
 
     double rchi0 = -2 * (rl0 - rmaxl);
@@ -1153,12 +1161,12 @@ int main()
     for(int i = 0; i < n; i++){
         double diffs = 0;
         for(int j = 0; j < rclms; j ++){
-            diffs += rcoefficients(j,0) * (afeat[i][rfactors[j]] - rfeat[i][rfactors[j]]);
+            diffs += rcoefficients(j,0) * (rfeat[i][rfactors[j]] - afeat[i][rfactors[j]]);
         }
-        double pa = 1/(1+exp(-diffs - log(rfeat[i]["options"])));
-        if(pa >= 0.5 && afeat[i]["rd"] == 1 || pa < 0.5 && afeat[i]["rd"] == 0) rcnt1 ++;
-        double pr = 1/(1+exp(diffs + log(rfeat[i]["options"])));
-        if(pr >= 0.5 && afeat[i]["rd"] == 0 || pr < 0.5 && afeat[i]["rd"] == 1) rcnt2 ++;
+        double pa = 1/(1+exp(diffs));
+        if(pa >= 0.5 && rfeat[i]["rd"] == 0 || pa < 0.5 && rfeat[i]["rd"] == 1) rcnt1 ++;
+        double pr = 1/(1+exp( - diffs));
+        if(pr >= 0.5 && rfeat[i]["rd"] == 1 || pr < 0.5 && rfeat[i]["rd"] == 0) rcnt2 ++;
     }
     double rrho = 1 - rmaxl / rl0;
 
@@ -1178,6 +1186,7 @@ int main()
     double mu = 1 / rcoefficients(0,0);
     cout << "mu:" << mu << endl;
     //便宜的
+    mu = abs(mu);
     Eigen::MatrixXd newscoeff;
     newscoeff = MatrixXd::Zero(sclms + rclms - 1, 1);
     //β(bar), γ(bar)
@@ -1192,50 +1201,74 @@ int main()
         newscoeff(i - 1 + sclms,0) = rcoefficients(i,0);
     }
     //step3
-    //ここではcfeat1をP(a)-alternateとQ(r)-regular
-    //cfeat2をP(r)-regularとQ(s)-subwayとしてプールする
+    //ここではcfeat2をP(a)-alternateとQ(r)-regular
+    //cfeat1をP(r)-regularとQ(s)-statedとしてプールする
+    //逆！！ 他はR,Sに特有の特性を削除
     vector<map<string, double>> cfeat1(2*n);
     vector<map<string, double>> cfeat2(2*n);
 
     LoadFileAsMap("feat.csv", "double", afeat);
 
+    //stated stated
     for(int i = 0; i < n; i++){
         for(const auto& key: sfeat[i]){
-            if(key.first == "autobus") {
-                cfeat2[i][key.first] = sfeat[i][key.first];
-            } else {
-                cfeat2[i][key.first] = mu * sfeat[i][key.first];
-            }
+            cfeat1[i][key.first] = mu * sfeat[i][key.first];
         }
-        //cfeat2[i]["d"] = sfeat[i]["sd"];
-        cfeat2[i]["options"] = sfeat[i]["options"];
+        cfeat1[i]["options"] = sfeat[i]["options"];
+        cfeat1[i]["d"] = sfeat[i]["sd"];
+        for(int j = 1; j < rclms; j++){
+            //revealedに特有な特性の削除
+            cfeat1[i][rfactors[j]] = 0;
+        }
     }
+
+    //revealed alternate
     for(int i = 0; i < n; i++){
         for(const auto& key: afeat[i]){
-            cfeat1[i + n][key.first] = afeat[i][key.first];
-        }
-        cfeat1[i + n]["d"] = afeat[i]["rd"];
-        cfeat1[i + n]["options"] = afeat[i]["options"];
-    }
-    for(int i = 0; i < n; i++){
-        for(const auto& key: rfeat[i]){
-            if(key.first == "gender" || key.first == "age"|| key.first == "licenseCar" || key.first == "licenseBike" || key.first == "trainAvailable" || key.first == "bicycleAvailable" || key.first == "receptivity"){
-                cfeat1[i][key.first] = 0;
-            } else{
-                cfeat1[i][key.first] = rfeat[i][key.first];
-            }
-        }
-        cfeat1[i]["d"] = 1 - sfeat[i]["sd"];
-        cfeat1[i]["options"] = rfeat[i]["options"];
-    }
-    for(int i = 0; i < n; i++){
-        for(const auto& key: rfeat[i]){
             if(key.first == "gender" || key.first == "age"|| key.first == "licenseCar" || key.first == "licenseBike" || key.first == "trainAvailable" || key.first == "bicycleAvailable" || key.first == "receptivity"){
                 cfeat2[i + n][key.first] = 0;
+            } else{
+                cfeat2[i + n][key.first] = afeat[i][key.first];
             }
-            cfeat2[i + n][key.first] = rfeat[i][key.first];
         }
-        cfeat2[i + n]["options"] = rfeat[i]["options"];
+        cfeat2[i + n]["options"] = 1;
+        for(int j = rscommon; j < sclms - 1; j++){
+            //statedに特有な特性の削除
+            cfeat2[i + n][sfactors[j]] = 0;
+        }
+    }
+
+    //stated regular
+    for(int i = 0; i < n; i++){
+        for(const auto& key: rfeat[i]){
+            if(key.first == "gender" || key.first == "age"|| key.first == "licenseCar" || key.first == "licenseBike" || key.first == "trainAvailable" || key.first == "bicycleAvailable" || key.first == "receptivity"){
+                cfeat2[i][key.first] = 0;
+            } else{
+                cfeat2[i][key.first] = rfeat[i][key.first];
+            }
+        }
+        cfeat2[i]["options"] = rfeat[i]["options"];
+        for(int j = 1; j < rclms; j++){
+            //revealedに特有な特性の削除
+            cfeat2[i][rfactors[j]] = 0;
+        }
+    }
+
+    //revealed regular
+    for(int i = 0; i < n; i++){
+        for(const auto& key: rfeat[i]){
+            if(key.first == "gender" || key.first == "age"|| key.first == "licenseCar" || key.first == "licenseBike" || key.first == "trainAvailable" || key.first == "bicycleAvailable" || key.first == "receptivity"){
+                cfeat1[i + n][key.first] = 0;
+            }
+            cfeat1[i + n][key.first] = rfeat[i][key.first];
+        }
+        cfeat1[i + n]["d"] = rfeat[i]["rd"];
+        cfeat1[i + n]["options"] = 1;
+
+        for(int j = rscommon; j < sclms - 1; j++){
+            //statedに特有な特性の削除
+            cfeat1[i + n][sfactors[j]] = 0;
+        }
     }
 
     /*for(int i = 0; i < cfeat1.size(); i++){
@@ -1267,6 +1300,7 @@ int main()
     Eigen::MatrixXd chessian;
     chessian = MatrixXd::Zero(cclms, cclms);
     int ccnt = 0;
+    int ccntmax = 0;
 
     while(true){
         //勾配ベクトルの要素 (i,0)
@@ -1279,8 +1313,8 @@ int main()
                 for(int k = 0; k < cclms; k++){
                     diffs += ccoefficients(k,0) * (cfeat1[j][cfactors[k]] - cfeat2[j][cfactors[k]]);
                 }
-                double pa = 1 / (1 + exp( - (diffs + log(cfeat2[j]["options"]))));
-                fac += (cfeat1[i]["d"] - pa) * (cfeat1[j][cfactors[i]] - cfeat2[j][cfactors[i]]);
+                double p1 = 1 / (1 + exp( - (diffs - log(cfeat1[j]["options"]))));
+                fac += (cfeat1[i]["d"] - p1) * (cfeat1[j][cfactors[i]] - cfeat2[j][cfactors[i]]);
             }
             cgradient(i,0) = fac;
         }   
@@ -1294,9 +1328,9 @@ int main()
                     for(int l = 0; l < cclms; l++){
                         diffs += ccoefficients(l,0) * (cfeat1[k][cfactors[l]] - cfeat2[k][cfactors[l]]);
                     }
-                    double pa = 1 / (1 + exp( - ( diffs + log(cfeat2[j]["options"]))));
-                    double pr = 1 - pa;
-                    fac += pr * pa * (cfeat1[k][cfactors[i]] - cfeat2[k][cfactors[i]]) * (cfeat1[k][cfactors[j]] - cfeat2[k][cfactors[j]]);
+                    double p1 = 1 / (1 + exp( - ( diffs - log(cfeat1[j]["options"]))));
+                    double p2 = 1 - p1;
+                    fac += p1 * p2 * (cfeat1[k][cfactors[i]] - cfeat2[k][cfactors[i]]) * (cfeat1[k][cfactors[j]] - cfeat2[k][cfactors[j]]);
                 }
                 chessian(i,j) = - fac;
             }
@@ -1306,13 +1340,12 @@ int main()
         //cout <<"hessian\n" << chessian << endl;
 
         MatrixXd renewedcos;
-        //renewedcos = ccoefficients - 0.01*cgradient;
         renewedcos = ccoefficients - 0.001 * chessian.ldlt().solve(cgradient);
         double cert1 = 0;
         for(int i = 0; i < cclms; i++){
             cert1 += pow(renewedcos(i,0) - ccoefficients(i,0), 2.0);
         }
-        if(ccnt % 100 == 0){
+        if(ccnt % 1 == 0){
             cout <<ccnt << "回目" << endl;
             cout << "c1:" <<  cert1 << endl;
             Eigen::MatrixXd cvarcov;
@@ -1330,7 +1363,7 @@ int main()
                 for(int j = 0; j < cclms; j ++){
                     diffs += ccoefficients(j,0) * (cfeat1[i][cfactors[j]] - cfeat2[i][cfactors[j]]);
                 }
-                cmaxl += cfeat1[i]["d"] * log(1/(1+exp( - diffs - log(cfeat2[i]["options"])))) + (1 - cfeat1[i]["d"]) * log(1/(1+exp(diffs + log(cfeat2[i]["options"]))));
+                cmaxl += cfeat1[i]["d"] * log(1/(1+exp( - diffs + log(cfeat1[i]["options"])))) + (1 - cfeat1[i]["d"]) * log(1/(1+exp(diffs - log(cfeat1[i]["options"]))));
             }        
             cout << "Lmax:" << cmaxl << endl;
  
@@ -1365,12 +1398,12 @@ int main()
 
     double cl0 = 0;
     for(int i = 0; i < 2 * n; i++){
-        cl0 += cfeat1[i]["d"] * log(1/(1 + (1/cfeat2[i]["options"]))) + (1 - cfeat1[i]["d"]) * log(1/(1 + cfeat2[i]["options"]));
+        cl0 += cfeat1[i]["d"] * log(1/(1 + cfeat1[i]["options"])) + (1 - cfeat1[i]["d"]) * log(1/(1 + (1 / cfeat1[i]["options"])));
     }
 
     double clc = 0;
     for(int i = 0; i < 2 * n; i++){
-        clc += cfeat1[i]["d"] * log(1/(1+exp(ccoefficients(0,0) - log(cfeat2[i]["options"])))) + (1 - cfeat1[i]["d"]) * log(1/(1+exp( - ccoefficients(0,0) + log(cfeat2[i]["options"]))));
+        clc += cfeat1[i]["d"] * log(1/(1+exp( - ccoefficients(0,0) + log(cfeat1[i]["options"])))) + (1 - cfeat1[i]["d"]) * log(1/(1+exp(ccoefficients(0,0) - log(cfeat1[i]["options"]))));
     }
 
     double cmaxl = 0;
@@ -1379,7 +1412,7 @@ int main()
         for(int j = 0; j < cclms; j ++){
             diffs += ccoefficients(j,0) * (cfeat1[i][cfactors[j]] - cfeat2[i][cfactors[j]]);
         }
-        cmaxl += cfeat1[i]["d"] * log(1/(1+exp( - diffs - log(cfeat2[i]["options"])))) + (1 - cfeat1[i]["d"]) * log(1/(1+exp(diffs + log(cfeat2[i]["options"]))));
+        cmaxl += cfeat1[i]["d"] * log(1/(1+exp( - diffs + log(cfeat1[i]["options"])))) + (1 - cfeat1[i]["d"]) * log(1/(1+exp(diffs - log(cfeat1[i]["options"]))));
     }
 
     double cchi0 = -2 * (cl0 - cmaxl);
@@ -1392,10 +1425,10 @@ int main()
         for(int j = 0; j < cclms; j ++){
             diffs += ccoefficients(j,0) * (cfeat1[i][cfactors[j]] - cfeat2[i][cfactors[j]]);
         }
-        double pa = 1/(1+exp(-diffs - log(cfeat2[i]["options"])));
-        if(pa >= 0.5 && cfeat1[i]["d"] == 1 || pa < 0.5 && cfeat1[i]["d"] == 0) ccnt1 ++;
-        double pr = 1/(1+exp(diffs + log(cfeat2[i]["options"])));
-        if(pr >= 0.5 && cfeat1[i]["d"] == 0 || pr < 0.5 && cfeat1[i]["d"] == 1) ccnt2 ++;
+        double p1 = 1/(1+exp(- diffs + log(cfeat1[i]["options"])));
+        if(p1 >= 0.5 && cfeat1[i]["d"] == 1 || p1 < 0.5 && cfeat1[i]["d"] == 0) ccnt1 ++;
+        double p2 = 1/(1+exp(diffs - log(cfeat1[i]["options"])));
+        if(p2 >= 0.5 && cfeat1[i]["d"] == 0 || p2 < 0.5 && cfeat1[i]["d"] == 1) ccnt2 ++;
     }
     double crho = 1 - cmaxl / cl0;
 
@@ -1435,6 +1468,8 @@ int main()
 
     map<double, double> autobusFarebd;
     LoadFileAsFare("autobusFarebd.csv", autobusFarebd);
+    //1 - threshold
+    double recep = 0.25;
 
     //セグメント割合の推計に用いるtrip数合計
     double total_trip = 0;
@@ -1467,10 +1502,11 @@ int main()
             est.close[i]["cost"] = j.second;
             if(dist < j.first) break;
         }
-        est.close[i]["transfer"] = 1;
+        est.close[i]["fare"] = est.close[i]["cost"];
+        est.close[i]["transfer"] = 0;
         est.close[i]["egress"] = 0;
         est.close[i]["age"] = 0.5;
-        est.close[i]["receptivity"] = 0.5;
+        est.close[i]["receptivity"] = recep;
 
         est.close[i]["trip"] = close_trip[i];
         total_trip += close_trip[i];
@@ -1489,6 +1525,9 @@ int main()
     map<double, double> taxiFarebd;
     LoadFileAsFare("taxiFarebd.csv", taxiFarebd);
     est.close.resize(zones);
+
+    //autobus削除しない場合のテスト項
+    //sclms ++;
 
     for(const auto& i : taxiFarebd){
         est.taxi["cost"] = i.second;
@@ -1510,7 +1549,7 @@ int main()
     //場合によってはcardummyとtaxidummyを分けることの検討を
     est.taxi["car"] = 1;
     est.taxi["options"] = 3;
-    est.taxi["receptivity"] = 0.5;
+    est.taxi["receptivity"] = 0;
 
 
     for(int i = 0; i < zones; i++){
@@ -1560,7 +1599,7 @@ int main()
     est.bicycle["autobus"] = 0;
     est.bicycle["bike"] = 1;
     est.bicycle["options"] = 4;
-    est.bicycle["receptivity"] = 0.5;
+    est.bicycle["receptivity"] = 0;
 
     for(int i = 0; i < zones; i++){
         //est.closeの特性のbicycleに合わせた更新
@@ -1587,7 +1626,7 @@ int main()
 
     //5.5.3.close motorのみ
     //park + fuelpk * 距離
-    est.motor["cost"] = 300 + 7.12 * min(xmax, ymax);
+    est.motor["cost"] = 150 + 7.12 * min(xmax, ymax);
     est.motor["access"] = 0;
     est.motor["invehicle"] = 0;
     est.motor["walktime"] = 0;
@@ -1602,7 +1641,7 @@ int main()
     est.motor["autobus"] = 0;
     est.motor["bike"] = 1;
     est.motor["options"] = 5;
-    est.motor["receptivity"] = 0.5;
+    est.motor["receptivity"] = 0;
 
     for(int i = 0; i < zones; i++){
         //est.closeの特性のbicycleに合わせた更新
@@ -1642,7 +1681,7 @@ int main()
     est.car["autobus"] = 0;
     est.car["car"] = 1;
     est.car["options"] = 6;
-    est.car["receptivity"] = 0.5;
+    est.car["receptivity"] = 0;
 
     for(int i = 0; i < zones; i++){
         //est.closeの特性のcarに合わせた更新
@@ -1744,11 +1783,13 @@ int main()
             if(dist < j.first) break;
         }
         est.far[i]["cost"] += train_cost;
+        est.far[i]["fare"] = est.far[i]["cost"];
 
-        est.far[i]["transfer"] = 3;
+        est.far[i]["transfer"] = 2;
         //便宜的にtrainだとegressが長くなることを反映
         est.far[i]["egress"] = 0.25;
         est.far[i]["age"] = 0.5;
+        est.far[i]["receptivity"] = recep;
 
         est.far[i]["trip"] = far_trip[i];
         far_total_trip += far_trip[i];
@@ -1823,7 +1864,7 @@ int main()
     fbicycle_total *= est.bicycle_ratio;*/
 
     //5.6.3.far motor
-    est.motor["cost"] = 300 + 7.12 * far_length;
+    est.motor["cost"] = 150 + 7.12 * far_length;
     est.motor["time"] = 1.1 * far_length / 35;
     est.motor["options"] = 6;
 
