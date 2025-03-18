@@ -873,7 +873,7 @@ int main()
     //テストデータでbikeはサンプル数が少ない つまりbikeをパラメータとして導入すると収束しない
     //順番は(RPSP共通特性) -> (SP特有特性)　-> (自動運転定数項autobus)
     //licenseCarなどの個人特性を導入する場合、どちらかを0にしなければ意味が無い
-    vector<string> sfactors = {"train","invehicle","time","fare","cost","receptivity","autobus"};
+    vector<string> sfactors = {"train","invehicle","time","fare","cost","autobus"};
     int sclms = sfactors.size();
     //RSSP共通特性
     int rscommon  = 5;
@@ -1469,10 +1469,11 @@ int main()
     map<double, double> autobusFarebd;
     LoadFileAsFare("autobusFarebd.csv", autobusFarebd);
     //1 - threshold
-    double recep = 0.25;
-
+    double recep = 1;
+    //2025.3.16. recep0 stated intention threshold 0.5
     //セグメント割合の推計に用いるtrip数合計
     double total_trip = 0;
+
 
     for(int i = 0; i < zones; i++){
         //5.1.access
@@ -1533,6 +1534,7 @@ int main()
         est.taxi["cost"] = i.second;
         if(min(xmax, ymax) < i.first) break;
     }
+    est.taxi["fare"] = est.taxi["cost"];
     //taxiの特性の計算
     est.taxi["access"] = 0;
     est.taxi["invehicle"] = 0;
@@ -1579,7 +1581,7 @@ int main()
         ctaxi_total += est.close[i]["trip"] * ctaxi_prob[i];
         close_bus_trip[i] -= (1 - (est.bicycle_ratio + est.car_ratio + est.motor_ratio))* est.close[i]["trip"] * ctaxi_prob[i];
     }
-
+    cout << ctaxi_total << endl;
     ctaxi_total *= 1 - (est.bicycle_ratio + est.car_ratio + est.motor_ratio);
 
     //5.5.2.close bicycleのみ
@@ -1802,7 +1804,7 @@ int main()
         est.taxi["cost"] = i.second;
         if(far_length < i.first) break;
     }
-
+    est.taxi["fare"] = est.taxi["cost"];
     //taxiの特性の再計算 close -> far
     est.taxi["time"] = 1.2 * far_length / 40;
     est.taxi["options"] = 4;
@@ -1931,6 +1933,20 @@ int main()
 
     double far_total = ftaxi_total + fmotor_total + fcar_total;
     double far_prob = far_total / far_total_trip;
+
+
+    cout << "ctaxi:" << ctaxi_total / total_trip << endl;
+    cout << "cbicycle:" << cbicycle_total / total_trip << endl;
+    cout << "cmotor:" << cmotor_total / total_trip << endl;
+    cout << "ccar:" << ccar_total / total_trip << endl;
+    cout << "ftaxi:" << ftaxi_total / far_total_trip << endl;
+    cout << "fmotor:" << fmotor_total / far_total_trip << endl;
+    cout << "fcar:" << fcar_total / far_total_trip << endl;
+
+    cout << "taxi:" << (ctaxi_total + ftaxi_total)/(total_trip + far_total_trip) << endl;
+    //cout << "bicycle:" << (cbicycle_total + fbicycle_total)/(total_trip + far_total_trip) << endl;
+    cout << "motoe:" << (cmotor_total + fmotor_total)/(total_trip + far_total_trip) << endl;
+    cout << "car:" << (ccar_total + fcar_total)/(total_trip + far_total_trip) << endl;
 
     cout << "close" << total_trip - close_total << endl;
     cout << "far" << far_total_trip - far_total << endl;
